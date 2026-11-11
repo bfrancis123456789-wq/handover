@@ -152,6 +152,8 @@ async function makePng(browser, file, color, label) {
     await staff.page.click('nav >> text=Announcements')
     await staff.page.waitForSelector('text=No messages in Announcements yet', { timeout: 8000 }).catch(() => {})
     check('empty channel shows friendly empty state', await staff.page.isVisible('text=No messages in Announcements yet'))
+    check('team member cannot post in Announcements and is told why',
+      (await staff.page.isVisible('text=Only managers and supervisors can post in Announcements')) && !(await staff.page.isVisible('#chat-text')))
     await mgr.page.click('nav >> text=General')
     await staff.page.click('nav >> text=General')
     await staff.page.fill('#chat-text', 'Fridge 3 is broken and leaking water')

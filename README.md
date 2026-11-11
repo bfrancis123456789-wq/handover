@@ -7,7 +7,7 @@ Keep every shift on the same page. Handover is a workplace chat app for shift-ba
 ## Features
 
 **Chat**
-- Five channels: General, Announcements and Team Member for everyone, Supervisors for supervisors and managers, Management for managers only
+- Five channels: General and Team Member for everyone, Announcements that everyone reads but only supervisors and managers post in, Supervisors for supervisors and managers, Management for managers only
 - Live messages, photos (resized on the phone before upload), likes, and full-screen photos with Save
 - Unread counts on each channel, in the browser tab and on the phone menu button. Channels muted in Notifications show a quiet dot instead of a number
 - Date headings, "Show earlier messages", and a "new messages" button when you've scrolled up
@@ -64,6 +64,7 @@ All rules live in the database, so the interface cannot bypass them.
 | Users only see their own workplace's profiles, messages, likes, briefs, photos and read markers | RLS policies built on `my_workplace_id()` |
 | Supervisors channel: supervisors and managers. Management channel: managers only | `can_access_channel()`, used by message, like, storage and unread rules |
 | Only managers change roles, remove members or reset the join code; a workplace always keeps a manager | `set_member_role()`, `remove_member()`, `regenerate_join_code()`; `role` and `workplace_id` can't be updated directly |
+| Only supervisors and managers post in Announcements (photos included) | `can_post_in_channel()`, used by the message and photo upload rules |
 | Authors delete their own messages; managers delete any in their workplace | `delete own or as manager` policy |
 | The join code is only visible to managers | the column isn't granted to users; read through `get_join_code()` |
 | The only manager can't leave while others remain | `leave_workplace()`. If they are the last person left, the workplace is deleted |
@@ -74,8 +75,8 @@ All rules live in the database, so the interface cannot bypass them.
 
 Two test suites run against a local Supabase stack (needs Docker and the Supabase CLI):
 
-- `e2e/walkthrough.cjs`: 75 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, phone layout and more.
-- `e2e/security.sql`: 22 checks that act as different users directly against the database, proving the rules hold even without the app.
+- `e2e/walkthrough.cjs`: 76 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, phone layout and more.
+- `e2e/security.sql`: 25 checks that act as different users directly against the database, proving the rules hold even without the app.
 
 ```bash
 supabase start

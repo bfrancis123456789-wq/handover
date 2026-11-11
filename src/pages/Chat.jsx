@@ -3,7 +3,7 @@ import { Navigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useUnread } from '../context/UnreadContext'
 import { supabase } from '../lib/supabase'
-import { canAccess, channelById } from '../lib/constants'
+import { canAccess, canPost, channelById } from '../lib/constants'
 import { compressImage, fileExtension } from '../lib/images'
 import { dayLabel, messageTime } from '../lib/format'
 import Avatar from '../components/Avatar'
@@ -350,6 +350,7 @@ export default function Chat() {
 
   const Icon = channel.roles.length < 3 ? LockIcon : HashIcon
   const isManager = profile.role === 'manager'
+  const mayPost = canPost(channelId, profile.role)
 
   return (
     <div className="flex h-full flex-col">
@@ -413,6 +414,12 @@ export default function Chat() {
         )}
       </div>
 
+      {!mayPost ? (
+        <div className="border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-center text-sm text-slate-500 sm:px-6" role="note">
+          <LockIcon className="mr-1.5 inline h-4 w-4 align-[-3px]" />
+          Only managers and supervisors can post in {channel.name}.
+        </div>
+      ) : (
       <form onSubmit={post} className="border-t border-slate-200 bg-white px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
         <div className="mx-auto max-w-3xl">
           {postError && <div className="mb-2"><Notice kind="error">{postError}</Notice></div>}
@@ -448,6 +455,7 @@ export default function Chat() {
           </div>
         </div>
       </form>
+      )}
 
       {viewer && <ImageViewer src={viewer} onClose={() => setViewer(null)} />}
     </div>

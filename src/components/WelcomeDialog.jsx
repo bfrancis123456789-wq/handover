@@ -16,7 +16,7 @@ const COPY = {
   supervisor: {
     title: 'Welcome to the team',
     points: [
-      'Post updates in the channel that fits, so the right people see them.',
+      'Post important news in Announcements. Everyone reads it, and only supervisors and managers can post there.',
       'The Supervisors channel is for shift leads and managers.',
       'Check Home before your shift for the latest shift brief.',
     ],

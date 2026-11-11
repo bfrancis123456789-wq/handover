@@ -11,7 +11,7 @@ export const ROLE_ORDER = ['team_member', 'supervisor', 'manager']
 // Must match can_access_channel() in the database.
 export const CHANNELS = [
   { id: 'general', name: 'General', roles: ['team_member', 'supervisor', 'manager'], blurb: 'Day-to-day chat for the whole team.' },
-  { id: 'announcements', name: 'Announcements', roles: ['team_member', 'supervisor', 'manager'], blurb: 'Rota changes, policies and news everyone should see.' },
+  { id: 'announcements', name: 'Announcements', roles: ['team_member', 'supervisor', 'manager'], postRoles: ['supervisor', 'manager'], blurb: 'Rota changes, policies and news from managers and supervisors.' },
   { id: 'team_member', name: 'Team Member', roles: ['team_member', 'supervisor', 'manager'], blurb: 'Swaps, cover requests and floor updates.' },
   { id: 'supervisors', name: 'Supervisors', roles: ['supervisor', 'manager'], blurb: 'Shift leads and managers only.' },
   { id: 'management', name: 'Management', roles: ['manager'], blurb: 'Managers only.' },
@@ -20,5 +20,11 @@ export const CHANNELS = [
 export const channelById = (id) => CHANNELS.find((c) => c.id === id)
 
 export const canAccess = (channelId, role) => Boolean(channelById(channelId)?.roles.includes(role))
+
+// Must match can_post_in_channel() in the database.
+export const canPost = (channelId, role) => {
+  const c = channelById(channelId)
+  return Boolean(c?.roles.includes(role) && (!c.postRoles || c.postRoles.includes(role)))
+}
 
 export const channelsFor = (role) => CHANNELS.filter((c) => c.roles.includes(role))

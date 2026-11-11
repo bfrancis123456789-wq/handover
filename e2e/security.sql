@@ -84,6 +84,10 @@ select pg_temp.expect('staff cannot delete the manager''s message',
 delete from messages where content = 'staff general';
 select pg_temp.expect('staff can delete their own message',
   not exists (select 1 from messages where content = 'staff general'));
+select pg_temp.expect_error('staff cannot post in Announcements',
+  $$insert into messages (workplace_id, channel, author_id, content) values (my_workplace_id(), 'announcements', auth.uid(), 'x')$$);
+select pg_temp.expect_error('staff cannot upload photos to Announcements',
+  $$insert into storage.objects (bucket_id, name, owner) values ('message-images', my_workplace_id() || '/announcements/x.jpg', auth.uid())$$);
 select pg_temp.expect_error('staff cannot remove members',
   $$select public.remove_member('00000000-0000-0000-0000-0000000000c3')$$);
 select pg_temp.expect_error('staff cannot reset the join code',
@@ -106,6 +110,9 @@ select pg_temp.expect_error('staff cannot write read markers directly',
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000c3');
 select pg_temp.expect('supervisor unread counts include Supervisors but not Management',
   (select array_agg(channel order by channel) from unread_counts()) = array['announcements', 'general', 'supervisors', 'team_member']);
+insert into messages (workplace_id, channel, author_id, content) values (my_workplace_id(), 'announcements', auth.uid(), 'supervisor news');
+select pg_temp.expect('supervisor can post in Announcements',
+  exists (select 1 from messages where content = 'supervisor news'));
 delete from messages where content = 'manager general';
 select pg_temp.expect('supervisor cannot delete others'' messages',
   exists (select 1 from messages where content = 'manager general'));
