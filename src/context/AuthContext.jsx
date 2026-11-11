@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext(null)
@@ -8,6 +8,10 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [workplace, setWorkplace] = useState(null)
   const [profileLoading, setProfileLoading] = useState(true)
+  const [recovery, setRecovery] = useState(false) // signed in from a password reset link
+  const [leftWorkplace, setLeftWorkplace] = useState(null) // name of the workplace the user just left or was removed from
+  const workplaceRef = useRef(null)
+  workplaceRef.current = workplace
 
   const loadProfile = useCallback(async (userId) => {
     if (!userId) {
@@ -34,7 +38,11 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s))
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true)
+      if (event === 'SIGNED_OUT') setRecovery(false)
+      setSession(s)
+    })
     return () => sub.subscription.unsubscribe()
   }, [])
 
@@ -49,9 +57,13 @@ export function AuthProvider({ children }) {
     if (!userId) return
     const ch = supabase
       .channel(`profile-${userId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` }, (payload) =>
-        setProfile((prev) => ({ ...prev, ...payload.new })),
-      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` }, (payload) => {
+        if (!payload.new.workplace_id && workplaceRef.current) {
+          setLeftWorkplace(workplaceRef.current.name)
+          setWorkplace(null)
+        }
+        setProfile((prev) => ({ ...prev, ...payload.new }))
+      })
       .subscribe()
     return () => supabase.removeChannel(ch)
   }, [userId])
@@ -62,7 +74,11 @@ export function AuthProvider({ children }) {
     profile,
     workplace,
     loading: session === undefined || (Boolean(session) && profileLoading),
+    recovery,
+    finishRecovery: () => setRecovery(false),
+    leftWorkplace,
     refresh: () => loadProfile(userId),
+    noteLeft: (name) => setLeftWorkplace(name),
     updateProfileLocal: (patch) => setProfile((prev) => ({ ...prev, ...patch })),
     signOut: () => supabase.auth.signOut(),
   }

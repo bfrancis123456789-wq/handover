@@ -8,6 +8,10 @@ import Anthropic from "npm:@anthropic-ai/sdk@1";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MODEL = "claude-haiku-5-5";
+const MAX_MESSAGES = 400; // most recent messages sent to the model
+const MAX_MESSAGE_CHARS = 600; // long messages are cut to this length
+const MAX_TRANSCRIPT_CHARS = 60_000; // roughly 15k tokens, well under a cent on Haiku
+const COOLDOWN_MS = 60_000; // one fresh brief per person per minute
 
 const CHANNEL_LABELS: Record<string, string> = {
   general: "General",
@@ -95,18 +99,42 @@ Deno.serve(async (req) => {
   const channels = ACCESS[profile.role] ?? ACCESS.team_member;
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  const { data: messages, error: messagesError } = await supabase
-    .from("messages")
-    .select("channel, content, image_url, created_at, author:profiles!messages_author_id_fkey(display_name, role)")
-    .eq("workplace_id", profile.workplace_id)
-    .in("channel", channels)
-    .gte("created_at", since)
-    .order("created_at", { ascending: true })
-    .limit(600);
+  // Newest messages first, so a very busy day keeps the most recent ones.
+  const [{ data: recent, error: messagesError }, { data: last }] = await Promise.all([
+    supabase
+      .from("messages")
+      .select("channel, content, image_url, created_at, author:profiles!messages_author_id_fkey(display_name, role)")
+      .eq("workplace_id", profile.workplace_id)
+      .in("channel", channels)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(MAX_MESSAGES),
+    supabase
+      .from("summaries")
+      .select("id, content, created_at")
+      .eq("user_id", profile.id)
+      .eq("workplace_id", profile.workplace_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
   if (messagesError) return json({ error: "Could not load messages. Try again." }, 500);
 
-  if (!messages || messages.length === 0) {
+  if (!recent || recent.length === 0) {
     return json({ empty: true });
+  }
+  const messages = [...recent].reverse();
+
+  // Reuse the saved brief when nothing new has been posted since it was written
+  // (and the person's role, so the channels covered, has not changed).
+  const sameScope = last && last.content?.role === profile.role;
+  const newest = messages[messages.length - 1].created_at;
+  if (sameScope && new Date(newest) <= new Date(last.created_at)) {
+    return json({ summary: last, unchanged: true });
+  }
+  if (sameScope && Date.now() - new Date(last.created_at).getTime() < COOLDOWN_MS) {
+    const wait = Math.ceil((COOLDOWN_MS - (Date.now() - new Date(last.created_at).getTime())) / 1000);
+    return json({ summary: last, cooldown: true, retry_after: wait });
   }
 
   const transcript = messages
@@ -115,10 +143,15 @@ Deno.serve(async (req) => {
       const author = (m as any).author;
       const time = new Date(m.created_at).toISOString().slice(0, 16).replace("T", " ");
       const who = author ? `${author.display_name} (${author.role.replace("_", " ")})` : "Former member";
-      const text = [m.content?.trim(), m.image_url ? "[attached a photo]" : ""].filter(Boolean).join(" ");
+      const body = (m.content ?? "").trim().replace(/\s+/g, " ").slice(0, MAX_MESSAGE_CHARS);
+      const text = [body, m.image_url ? "[attached a photo]" : ""].filter(Boolean).join(" ");
       return `[${time} UTC] #${CHANNEL_LABELS[m.channel] ?? m.channel} ${who}: ${text}`;
-    })
-    .join("\n");
+    });
+  // Keep the prompt small: drop the oldest lines if the transcript is very long.
+  let transcriptLines = transcript;
+  while (transcriptLines.join("\n").length > MAX_TRANSCRIPT_CHARS && transcriptLines.length > 1) {
+    transcriptLines = transcriptLines.slice(Math.ceil(transcriptLines.length / 10));
+  }
 
   const client = new Anthropic({ apiKey });
 
@@ -135,7 +168,7 @@ Deno.serve(async (req) => {
       messages: [
         {
           role: "user",
-          content: `Here are the messages from the last 24 hours:\n\n<messages>\n${transcript}\n</messages>\n\nWrite the shift brief.`,
+          content: `Here are the messages from the last 24 hours:\n\n<messages>\n${transcriptLines.join("\n")}\n</messages>\n\nWrite the shift brief.`,
         },
       ],
     });
@@ -160,6 +193,8 @@ Deno.serve(async (req) => {
     resolved_today: brief.resolved_today ?? [],
     next_priority: brief.next_priority ?? [],
     message_count: messages.length,
+    role: profile.role,
+    channels: channels.map((c) => CHANNEL_LABELS[c]),
   };
 
   const { data: saved, error: saveError } = await supabase

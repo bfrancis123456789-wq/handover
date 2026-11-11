@@ -15,7 +15,7 @@ function Section({ title, subtitle, children, danger }) {
 }
 
 export default function Account() {
-  const { user, workplace, refresh } = useAuth()
+  const { user, workplace, refresh, noteLeft } = useAuth()
 
   const [email, setEmail] = useState('')
   const [emailMsg, setEmailMsg] = useState({ kind: 'success', text: '' })
@@ -61,6 +61,7 @@ export default function Account() {
       setLeaving(false)
       return setLeaveError(error.message)
     }
+    noteLeft(workplace?.name)
     await refresh() // no workplace -> the app routes to the setup screen
   }
 

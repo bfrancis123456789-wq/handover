@@ -10,6 +10,9 @@ const FAKE_AI = process.env.FAKE_AI || 'http://127.0.0.1:4010'
 const OUT = process.env.OUT_DIR || path.join(__dirname, 'out')
 fs.mkdirSync(OUT, { recursive: true })
 
+const { execSync } = require('child_process')
+const SERVICE_KEY = process.env.SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU'
+const sql = (q) => execSync(`docker exec -i supabase_db_handover psql -U postgres -tA`, { input: q }).toString().trim()
 const run = Date.now().toString(36)
 const email = (n) => `${n}.${run}@example.com`
 const results = []
@@ -335,6 +338,169 @@ async function makePng(browser, file, color, label) {
     await lead.page.click('.fixed nav >> text="General"')
     await lead.page.waitForSelector('article')
     await lead.page.screenshot({ path: path.join(OUT, 'phone-chat.png') })
+  })
+
+
+  // 16. Unread counts
+  await step('unread counts', async () => {
+    await staff.page.click('nav >> text=Home')
+    await mgr.page.click('nav >> text=Announcements')
+    await mgr.page.fill('#chat-text', 'Rota for next week is up')
+    await mgr.page.click('button:has-text("Post")')
+    await staff.page.waitForSelector('nav a:has-text("Announcements") [aria-label="1 unread"]', { timeout: 8000 })
+    check('unread badge appears live in the sidebar', true)
+    check('Home channel card shows new count', await staff.page.isVisible('text=1 new'))
+    check('browser tab shows unread total', (await staff.page.title()).startsWith('(1)'), await staff.page.title())
+    await staff.page.click('nav >> text=Announcements')
+    await staff.page.waitForSelector('article:has-text("Rota for next week")')
+    check('opening the channel clears its badge', !(await staff.page.isVisible('nav a:has-text("Announcements") [aria-label$="unread"]')))
+    await staff.page.reload()
+    await staff.page.waitForSelector('article:has-text("Rota for next week")')
+    await staff.page.waitForTimeout(800)
+    check('read state is saved after reload', !(await staff.page.isVisible('nav a:has-text("Announcements") [aria-label$="unread"]')))
+  })
+
+  // 17. Deleting messages
+  await step('delete messages', async () => {
+    await staff.page.click('nav >> text=General')
+    await mgr.page.click('nav >> text=General')
+    await staff.page.fill('#chat-text', 'Oops wrong channel')
+    await staff.page.click('button:has-text("Post")')
+    await mgr.page.waitForSelector('article:has-text("Oops wrong channel")', { timeout: 8000 })
+    const own = staff.page.locator('article', { hasText: 'Oops wrong channel' })
+    await own.hover()
+    await own.locator('button[aria-label="Delete message"]').click()
+    await own.locator('button:has-text("Delete")').last().click()
+    await staff.page.waitForSelector('article:has-text("Oops wrong channel")', { state: 'detached', timeout: 8000 })
+    check('author can delete their own message', true)
+    await mgr.page.waitForSelector('article:has-text("Oops wrong channel")', { state: 'detached', timeout: 8000 })
+    check('deleted message disappears for others live', true)
+    await mgr.page.fill('#chat-text', 'Manager note in general')
+    await mgr.page.click('button:has-text("Post")')
+    await staff.page.waitForSelector('article:has-text("Manager note in general")', { timeout: 8000 })
+    check('team member gets no delete button on others\' messages',
+      (await staff.page.locator('article', { hasText: 'Manager note in general' }).locator('button[aria-label="Delete message"]').count()) === 0)
+    const other = mgr.page.locator('article', { hasText: 'Photo of the leak' })
+    await other.hover()
+    await other.locator('button[aria-label="Delete message"]').click()
+    await other.locator('button:has-text("Delete")').last().click()
+    await staff.page.waitForSelector('article:has-text("Photo of the leak")', { state: 'detached', timeout: 8000 })
+    check('manager can delete anyone\'s message', true)
+  })
+
+  // 18. Brief reuse and cooldown
+  await step('brief reuse', async () => {
+    sql(`update summaries set created_at = now() - interval '5 minutes' where user_id = (select id from auth.users where email = '${email('sid')}');`)
+    await staff.page.click('nav >> text=Home')
+    let before = (await aiCalls()).length
+    await staff.page.click('button:has-text("Refresh Summary")')
+    await staff.page.waitForFunction((n) => !document.body.innerText.includes('Summarising'), null, { timeout: 15000 })
+    await staff.page.waitForTimeout(300)
+    check('new messages trigger a fresh brief', (await aiCalls()).length === before + 1)
+    before = (await aiCalls()).length
+    await staff.page.click('button:has-text("Refresh Summary")')
+    await staff.page.waitForSelector('text=Already up to date')
+    check('no new messages reuses the saved brief without calling the AI', (await aiCalls()).length === before)
+    check('brief lists the channels it covers', await staff.page.isVisible('text=Covers General, Announcements, Team Member'))
+    await mgr.page.fill('#chat-text', 'Ice machine is broken in the kitchen')
+    await mgr.page.click('button:has-text("Post")')
+    await mgr.page.waitForSelector('article:has-text("Ice machine")')
+    await staff.page.click('button:has-text("Refresh Summary")')
+    await staff.page.waitForSelector('text=refreshed moments ago')
+    check('cooldown stops repeat AI calls within a minute', (await aiCalls()).length === before)
+    const [copyOk] = await Promise.all([
+      staff.ctx.grantPermissions(['clipboard-read', 'clipboard-write']).then(() => true),
+    ])
+    await staff.page.click('button:has-text("Copy")')
+    const clip = await staff.page.evaluate(() => navigator.clipboard.readText())
+    check('Copy puts the brief on the clipboard as text', copyOk && clip.includes('CRITICAL ISSUES'), clip.slice(0, 60))
+  })
+
+  // 19. Older messages, date separators and jump to latest
+  await step('history and scrolling', async () => {
+    const wp = sql(`select id from workplaces where join_code = '${joinCode}';`)
+    const author = sql(`select id from auth.users where email = '${email('mia')}';`)
+    sql(`insert into messages (workplace_id, channel, author_id, content, created_at)
+         select '${wp}', 'team_member', '${author}', 'Older note ' || g, now() - interval '1 day' - (g || ' minutes')::interval
+         from generate_series(1, 60) g;`)
+    await staff.page.click('nav >> text=Team Member')
+    await staff.page.waitForSelector('text=Show earlier messages', { timeout: 8000 })
+    const firstCount = await staff.page.locator('article').count()
+    await staff.page.click('text=Show earlier messages')
+    await staff.page.waitForFunction((n) => document.querySelectorAll('article').length > n, firstCount, { timeout: 8000 })
+    check('Show earlier messages loads older history', (await staff.page.locator('article').count()) > firstCount)
+    check('messages are grouped under date headings', await staff.page.isVisible('[role="separator"]:has-text("Yesterday")'))
+    await staff.page.evaluate(() => { const f = document.querySelector('article').closest('.overflow-y-auto'); f.scrollTop = 0; f.dispatchEvent(new Event('scroll')) })
+    await mgr.page.click('nav >> text=Team Member')
+    await mgr.page.fill('#chat-text', 'Can someone check the linen cupboard')
+    await mgr.page.click('button:has-text("Post")')
+    await staff.page.waitForSelector('button:has-text("1 new message")', { timeout: 8000 })
+    check('a "new message" button appears when scrolled up', true)
+    await staff.page.click('button:has-text("1 new message")')
+    await staff.page.waitForSelector('button:has-text("1 new message")', { state: 'detached', timeout: 5000 })
+    check('tapping it jumps to the latest message', true)
+  })
+
+  // 20. Removing a member and resetting the code
+  await step('remove member and reset code', async () => {
+    await mgr.page.click('nav >> text=Manage Team')
+    const row = mgr.page.locator('li', { hasText: 'Lee Lead' })
+    await row.locator('button[aria-label="Remove Lee Lead"]').click()
+    await row.locator('button:has-text("Remove")').last().click()
+    await mgr.page.waitForSelector('text=Lee Lead was removed')
+    await lead.page.waitForSelector('text=no longer a member of Harbour Hotel', { timeout: 10000 })
+    check('removed person is sent to setup with an explanation', true)
+    const oldCode = joinCode
+    await mgr.page.click('button:has-text("Reset code")')
+    await mgr.page.click('button:has-text("Create new code")')
+    await mgr.page.waitForSelector('text=old code no longer works')
+    joinCode = (await mgr.page.textContent('.select-all')).trim()
+    check('reset gives a different code', joinCode !== oldCode && /^[A-Z0-9]{6}$/.test(joinCode))
+    await lead.page.fill('#join-code', oldCode)
+    await lead.page.click('button:has-text("Join workplace")')
+    await lead.page.waitForSelector('text=does not match any workplace')
+    check('old code stops working', true)
+    await lead.page.fill('#join-code', joinCode)
+    await lead.page.click('button:has-text("Join workplace")')
+    await lead.page.waitForSelector('text=Welcome to the team')
+    check('new code works', true)
+  })
+
+  // 21. Forgot password
+  await step('forgot password', async () => {
+    const p = (await newUser(browser, 'reset')).page
+    await p.goto(`${BASE}/login`)
+    await p.click('text=Forgot password?')
+    await p.fill('#reset-email', email('oli'))
+    await p.click('button:has-text("Send reset link")')
+    await p.waitForSelector('text=Check your email')
+    check('reset request confirms a link was sent', true)
+    const r = await fetch('http://127.0.0.1:54321/auth/v1/admin/generate_link', {
+      method: 'POST',
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'recovery', email: email('oli'), redirect_to: `${BASE}/reset-password` }),
+    }).then((x) => x.json())
+    await p.goto(r.action_link)
+    await p.waitForSelector('text=Choose a new password', { timeout: 10000 })
+    check('reset link opens the new password screen', true)
+    await p.fill('#reset-password', 'brandnew789')
+    await p.fill('#reset-confirm', 'brandnew789')
+    await p.click('button:has-text("Save new password")')
+    await p.waitForSelector('text=Your Shift Brief', { timeout: 10000 })
+    check('saving the new password signs you in', true)
+    await outsider.page.click('button[aria-label="Sign out"]')
+    await outsider.page.fill('#login-email', email('oli'))
+    await outsider.page.fill('#login-password', 'brandnew789')
+    await outsider.page.click('button:has-text("Sign in")')
+    await outsider.page.waitForSelector('text=Your Shift Brief')
+    check('new password works on another device', true)
+  })
+
+  // 22. Installable on phones
+  await step('install', async () => {
+    const m = await fetch(`${BASE}/manifest.webmanifest`).then((x) => x.json())
+    const icon = await fetch(`${BASE}${m.icons[1].src}`)
+    check('web app manifest and icons are served', m.name === 'Handover' && m.display === 'standalone' && icon.ok)
   })
 
   check('no browser errors during the walkthrough', errors.length === 0, errors.slice(0, 5).join(' | '))

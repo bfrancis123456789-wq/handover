@@ -23,3 +23,6 @@ export const RefreshIcon = make(<><path d="M20 11a8 8 0 0 0-14.7-4.3L4 8.5" /><p
 export const LogoutIcon = make(<><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3" /></>)
 export const CameraIcon = make(<><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></>)
 export const ChatIcon = make(<><path d="M4 5h16v11H9l-5 4z" /></>)
+export const TrashIcon = make(<><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></>)
+export const ArrowDownIcon = make(<><path d="M12 5v14M6 13l6 6 6-6" /></>)
+export const MailIcon = make(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>)

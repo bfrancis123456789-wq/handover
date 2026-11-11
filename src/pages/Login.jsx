@@ -31,7 +31,10 @@ export default function Login() {
           <input id="login-email" type="email" autoComplete="email" required className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <div>
-          <label htmlFor="login-password" className="label">Password</label>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label htmlFor="login-password" className="text-sm font-medium text-slate-700">Password</label>
+            <Link to="/forgot-password" className="text-sm font-medium text-teal-dark hover:underline">Forgot password?</Link>
+          </div>
           <input id="login-password" type="password" autoComplete="current-password" required className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
         <Notice kind="error">{error}</Notice>

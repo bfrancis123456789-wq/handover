@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { formatCount, useUnread } from '../context/UnreadContext'
 import { supabase } from '../lib/supabase'
 import { channelsFor } from '../lib/constants'
 import { firstName, greeting, longDate, messageTime } from '../lib/format'
 import Notice from '../components/Notice'
 import Spinner from '../components/Spinner'
-import { HashIcon, LockIcon, RefreshIcon } from '../components/Icons'
+import { CopyIcon, HashIcon, LockIcon, RefreshIcon } from '../components/Icons'
 
 const SECTIONS = [
   { key: 'critical_issues', title: 'Critical Issues', dot: 'bg-red-500', tint: 'bg-red-50', text: 'text-red-700', empty: 'No critical issues reported.' },
@@ -14,6 +15,16 @@ const SECTIONS = [
   { key: 'resolved_today', title: 'Resolved Today', dot: 'bg-emerald-500', tint: 'bg-emerald-50', text: 'text-emerald-700', empty: 'Nothing marked as resolved.' },
   { key: 'next_priority', title: 'Next Priority', dot: 'bg-blue-500', tint: 'bg-blue-50', text: 'text-blue-700', empty: 'No priorities set.' },
 ]
+
+function briefAsText(content, workplaceName, when) {
+  const lines = [`Shift brief for ${workplaceName} (${when})`]
+  for (const s of SECTIONS) {
+    const items = content[s.key] ?? []
+    lines.push('', s.title.toUpperCase())
+    lines.push(...(items.length ? items.map((i) => `- ${i}`) : [`- ${s.empty}`]))
+  }
+  return lines.join('\n')
+}
 
 async function readFunctionError(error) {
   try {
@@ -49,6 +60,8 @@ function BriefSection({ section, items }) {
 
 export default function Home() {
   const { profile, workplace } = useAuth()
+  const { counts } = useUnread()
+  const [copied, setCopied] = useState(false)
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -88,6 +101,19 @@ export default function Home() {
     if (error) return setError(await readFunctionError(error))
     if (data?.empty) return setInfo('No messages in the last 24 hours, so there is nothing to summarise yet. Post an update and try again.')
     if (data?.summary) setSummary(data.summary)
+    if (data?.unchanged) setInfo('Already up to date. Nothing new has been posted since this brief was written.')
+    if (data?.cooldown) setInfo(`This brief was refreshed moments ago. You can refresh again in ${data.retry_after} seconds.`)
+  }
+
+  async function copyBrief() {
+    const text = briefAsText(summary.content, workplace?.name ?? 'your workplace', messageTime(summary.created_at))
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError('Copy did not work in this browser.')
+    }
   }
 
   const content = summary?.content
@@ -111,11 +137,19 @@ export default function Home() {
                 ? `Updated ${messageTime(summary.created_at)}${content.message_count ? ` from ${content.message_count} message${content.message_count === 1 ? '' : 's'}` : ''}`
                 : 'A summary of the last 24 hours across your channels.'}
             </p>
+            {content?.channels && <p className="mt-0.5 text-xs text-slate-400">Covers {content.channels.join(', ')}</p>}
           </div>
-          <button className="btn-primary" onClick={refreshSummary} disabled={refreshing}>
-            {refreshing ? <Spinner /> : <RefreshIcon className="h-4 w-4" />}
-            {refreshing ? 'Summarising…' : 'Refresh Summary'}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {content && (
+              <button className="btn-secondary" onClick={copyBrief}>
+                <CopyIcon className="h-4 w-4" /> {copied ? 'Copied' : 'Copy'}
+              </button>
+            )}
+            <button className="btn-primary" onClick={refreshSummary} disabled={refreshing}>
+              {refreshing ? <Spinner /> : <RefreshIcon className="h-4 w-4" />}
+              {refreshing ? 'Summarising…' : 'Refresh Summary'}
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 space-y-3">
@@ -146,8 +180,13 @@ export default function Home() {
           return (
             <Link key={c.id} to={`/channels/${c.id}`} className="card flex items-start gap-3 p-4 transition hover:ring-teal-brand/50">
               <span className="rounded-lg bg-teal-soft p-2 text-teal-dark"><Icon className="h-4 w-4" /></span>
-              <span className="min-w-0">
-                <span className="block font-semibold text-navy-900">{c.name}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 font-semibold text-navy-900">
+                  {c.name}
+                  {counts[c.id] > 0 && (
+                    <span className="rounded-full bg-teal-brand px-2 py-0.5 text-[11px] font-bold leading-none text-white tabular-nums">{formatCount(counts[c.id])} new</span>
+                  )}
+                </span>
                 <span className="block text-sm text-slate-500">{c.blurb}</span>
               </span>
             </Link>

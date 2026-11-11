@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import { isConfigured } from './lib/supabase'
@@ -5,14 +6,16 @@ import Layout from './components/Layout'
 import Spinner from './components/Spinner'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
+const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 import WorkplaceSetup from './pages/WorkplaceSetup'
 import Home from './pages/Home'
 import Chat from './pages/Chat'
-import Profile from './pages/settings/Profile'
-import Notifications from './pages/settings/Notifications'
-import Account from './pages/settings/Account'
-import Help from './pages/settings/Help'
-import ManageTeam from './pages/settings/ManageTeam'
+const Profile = lazy(() => import('./pages/settings/Profile'))
+const Notifications = lazy(() => import('./pages/settings/Notifications'))
+const Account = lazy(() => import('./pages/settings/Account'))
+const Help = lazy(() => import('./pages/settings/Help'))
+const ManageTeam = lazy(() => import('./pages/settings/ManageTeam'))
 
 function FullScreenSpinner() {
   return (
@@ -37,20 +40,25 @@ function NotConfigured() {
 }
 
 export default function App() {
-  const { session, profile, loading } = useAuth()
+  const { session, profile, loading, recovery } = useAuth()
 
   if (!isConfigured) return <NotConfigured />
   if (loading) return <FullScreenSpinner />
 
   if (!session) {
     return (
+      <Suspense fallback={<FullScreenSpinner />}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      </Suspense>
     )
   }
+
+  if (recovery) return <Suspense fallback={<FullScreenSpinner />}><ResetPassword /></Suspense>
 
   if (!profile?.workplace_id) {
     return (

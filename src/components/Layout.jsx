@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { UnreadProvider, formatCount, useUnread } from '../context/UnreadContext'
 import { channelsFor } from '../lib/constants'
 import Avatar from './Avatar'
 import Logo from './Logo'
 import RoleBadge from './RoleBadge'
 import WelcomeDialog from './WelcomeDialog'
+import Spinner from './Spinner'
 import {
   BellIcon, HashIcon, HelpIcon, HomeIcon, KeyIcon, LockIcon, LogoutIcon, MenuIcon, UserIcon, UsersIcon, XIcon,
 } from './Icons'
@@ -18,7 +20,17 @@ const SETTINGS = [
   { to: '/settings/team', label: 'Manage Team', icon: UsersIcon, managerOnly: true },
 ]
 
-function NavItem({ to, icon: Icon, children, end, onNavigate }) {
+function UnreadBadge({ count, muted }) {
+  if (!count) return null
+  if (muted) return <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-slate-400" aria-label="New messages (muted)" />
+  return (
+    <span className="ml-auto shrink-0 rounded-full bg-teal-brand px-1.5 py-0.5 text-[11px] font-bold leading-none text-white tabular-nums" aria-label={`${count} unread`}>
+      {formatCount(count)}
+    </span>
+  )
+}
+
+function NavItem({ to, icon: Icon, children, end, onNavigate, badge }) {
   return (
     <NavLink
       to={to}
@@ -32,6 +44,7 @@ function NavItem({ to, icon: Icon, children, end, onNavigate }) {
     >
       <Icon className="h-[18px] w-[18px] shrink-0" />
       <span className="truncate">{children}</span>
+      {badge}
     </NavLink>
   )
 }
@@ -42,7 +55,9 @@ function SectionLabel({ children }) {
 
 function Sidebar({ onClose }) {
   const { profile, workplace, signOut } = useAuth()
+  const { counts } = useUnread()
   const channels = channelsFor(profile.role)
+  const muted = (id) => profile.notification_settings?.[id] === false
   const settings = SETTINGS.filter((s) => !s.managerOnly || profile.role === 'manager')
 
   return (
@@ -63,7 +78,8 @@ function Sidebar({ onClose }) {
         <SectionLabel>Channels</SectionLabel>
         <div className="space-y-0.5">
           {channels.map((c) => (
-            <NavItem key={c.id} to={`/channels/${c.id}`} icon={c.roles.length < 3 ? LockIcon : HashIcon} onNavigate={onClose}>
+            <NavItem key={c.id} to={`/channels/${c.id}`} icon={c.roles.length < 3 ? LockIcon : HashIcon} onNavigate={onClose}
+              badge={<UnreadBadge count={counts[c.id]} muted={muted(c.id)} />}>
               {c.name}
             </NavItem>
           ))}
@@ -91,10 +107,12 @@ function Sidebar({ onClose }) {
   )
 }
 
-export default function Layout() {
+function LayoutInner() {
   const [open, setOpen] = useState(false)
   const location = useLocation()
   const { profile } = useAuth()
+  const { counts } = useUnread()
+  const anyUnread = Object.entries(counts).some(([ch, n]) => n > 0 && profile.notification_settings?.[ch] !== false)
 
   useEffect(() => setOpen(false), [location.pathname])
 
@@ -117,17 +135,28 @@ export default function Layout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-3 bg-navy-900 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white lg:hidden">
-          <button onClick={() => setOpen(true)} className="-ml-2 rounded-lg p-2 hover:bg-navy-800" aria-label="Open menu">
+          <button onClick={() => setOpen(true)} className="relative -ml-2 rounded-lg p-2 hover:bg-navy-800" aria-label="Open menu">
             <MenuIcon />
+            {anyUnread && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-teal-brand ring-2 ring-navy-900" />}
           </button>
           <Logo withText className="h-7 w-7" />
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <Outlet />
+          <Suspense fallback={<div className="flex h-full items-center justify-center"><Spinner className="h-6 w-6 text-teal-brand" /></div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 
       {!profile.has_onboarded && <WelcomeDialog />}
     </div>
+  )
+}
+
+export default function Layout() {
+  return (
+    <UnreadProvider>
+      <LayoutInner />
+    </UnreadProvider>
   )
 }

@@ -6,7 +6,7 @@ import Avatar from '../../components/Avatar'
 import PageHeader from '../../components/PageHeader'
 import Notice from '../../components/Notice'
 import Spinner from '../../components/Spinner'
-import { CopyIcon } from '../../components/Icons'
+import { CopyIcon, TrashIcon } from '../../components/Icons'
 
 export default function ManageTeam() {
   const { profile, refresh } = useAuth()
@@ -15,6 +15,8 @@ export default function ManageTeam() {
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
   const [savingId, setSavingId] = useState(null)
+  const [removingId, setRemovingId] = useState(null)
+  const [confirmReset, setConfirmReset] = useState(false)
   const [msg, setMsg] = useState({ kind: 'success', text: '' })
 
   useEffect(() => {
@@ -49,6 +51,24 @@ export default function ManageTeam() {
     if (member.id === profile.id) refresh()
   }
 
+  async function removeMember(member) {
+    setSavingId(member.id)
+    const { error } = await supabase.rpc('remove_member', { p_user: member.id })
+    setSavingId(null)
+    setRemovingId(null)
+    if (error) return setMsg({ kind: 'error', text: error.message })
+    setMembers((prev) => prev.filter((m) => m.id !== member.id))
+    setMsg({ kind: 'success', text: `${member.display_name} was removed from the workplace.` })
+  }
+
+  async function resetCode() {
+    const { data, error } = await supabase.rpc('regenerate_join_code')
+    setConfirmReset(false)
+    if (error) return setMsg({ kind: 'error', text: error.message })
+    setCode(data)
+    setMsg({ kind: 'success', text: 'New join code created. The old code no longer works.' })
+  }
+
   const counts = ROLE_ORDER.map((r) => ({ role: r, n: members.filter((m) => m.role === r).length }))
 
   return (
@@ -65,7 +85,18 @@ export default function ManageTeam() {
           <button className="btn-primary" onClick={copy} disabled={!code}>
             <CopyIcon className="h-4 w-4" /> {copied ? 'Copied' : 'Copy code'}
           </button>
+          {!confirmReset && (
+            <button className="btn-secondary" onClick={() => setConfirmReset(true)} disabled={!code}>Reset code</button>
+          )}
         </div>
+        {confirmReset && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-amber-50 p-3 ring-1 ring-inset ring-amber-200">
+            <p className="w-full text-sm text-amber-900 sm:w-auto sm:flex-1">Create a new code? The old one stops working. People already in the workplace stay in.</p>
+            <button className="btn-primary px-3 py-1.5 text-xs" onClick={resetCode}>Create new code</button>
+            <button className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setConfirmReset(false)}>Cancel</button>
+          </div>
+        )}
+        <p className="mt-3 text-xs text-slate-500">Reset the code if it has been shared outside your team.</p>
       </div>
 
       <div className="card mt-6">
@@ -98,7 +129,25 @@ export default function ManageTeam() {
                   >
                     {ROLE_ORDER.map((r) => <option key={r} value={r}>{ROLES[r].label}</option>)}
                   </select>
+                  {m.id !== profile.id && (
+                    <button
+                      type="button"
+                      onClick={() => setRemovingId(m.id)}
+                      className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      aria-label={`Remove ${m.display_name}`}
+                      title="Remove from workplace"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
+                {removingId === m.id && (
+                  <div className="flex w-full flex-wrap items-center gap-2 rounded-lg bg-red-50 p-3 ring-1 ring-inset ring-red-200">
+                    <p className="w-full text-sm font-medium text-red-800 sm:w-auto sm:flex-1">Remove {m.display_name}? They lose access straight away. Their messages stay.</p>
+                    <button type="button" className="btn-danger px-3 py-1.5 text-xs" onClick={() => removeMember(m)} disabled={savingId === m.id}>Remove</button>
+                    <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setRemovingId(null)}>Cancel</button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

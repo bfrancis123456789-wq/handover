@@ -6,7 +6,7 @@ import Notice from '../components/Notice'
 import AuthShell from './AuthShell'
 
 export default function WorkplaceSetup() {
-  const { profile, refresh, signOut } = useAuth()
+  const { profile, refresh, signOut, leftWorkplace } = useAuth()
   const [mode, setMode] = useState('join')
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
@@ -44,6 +44,7 @@ export default function WorkplaceSetup() {
       subtitle="Join your team with the code from your manager, or create a new workplace."
       footer={<button onClick={signOut} className="font-semibold text-slate-300 hover:text-white">Sign out</button>}
     >
+      {leftWorkplace && <div className="mb-4"><Notice kind="info">You're no longer a member of {leftWorkplace}. Join or create a workplace to carry on.</Notice></div>}
       <div role="tablist" className="mb-5 flex gap-1 rounded-lg bg-slate-100 p-1">
         {tab('join', 'Join a workplace')}
         {tab('create', 'Create a workplace')}

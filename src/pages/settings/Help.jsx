@@ -10,6 +10,10 @@ const FAQ = [
   { q: 'Who can see my messages?', a: 'Only people in your workplace who have access to the channel you posted in. Other workplaces can never see your data.' },
   { q: 'How do I save a photo someone posted?', a: 'Tap the photo to open it full screen, then tap Save.' },
   { q: 'How do I leave a workplace?', a: 'Go to Account and tap Leave Workplace. If you are the only manager, make someone else a manager first.' },
+  { q: 'Can I delete a message?', a: 'Yes. Tap the bin icon on your own message and confirm. Managers can delete any message, for example if something was posted in the wrong place.' },
+  { q: 'Someone has left the team. How do I remove them?', a: 'Managers can open Manage Team and tap the bin icon next to the person. If the join code was shared outside your team, tap Reset code there too.' },
+  { q: 'How do I put Handover on my phone\'s home screen?', a: 'On iPhone, open Handover in Safari, tap Share, then Add to Home Screen. On Android, open it in Chrome, tap the menu, then Install app or Add to Home screen.' },
+  { q: 'I forgot my password.', a: 'On the sign-in screen, tap Forgot password? and enter your email. We will send you a link to choose a new one.' },
 ]
 
 export default function Help() {
