@@ -18,11 +18,12 @@ const SETTINGS = [
   { to: '/settings/team', label: 'Manage Team', icon: UsersIcon, managerOnly: true },
 ]
 
-function NavItem({ to, icon: Icon, children, end }) {
+function NavItem({ to, icon: Icon, children, end, onNavigate }) {
   return (
     <NavLink
       to={to}
       end={end}
+      onClick={onNavigate}
       className={({ isActive }) =>
         `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
           isActive ? 'bg-teal-brand text-white' : 'text-slate-300 hover:bg-navy-800 hover:text-white'
@@ -57,12 +58,12 @@ function Sidebar({ onClose }) {
       <p className="truncate px-4 text-xs text-slate-400">{workplace?.name}</p>
 
       <nav className="mt-4 flex-1 overflow-y-auto px-3 pb-4" aria-label="Main">
-        <NavItem to="/" icon={HomeIcon} end>Home</NavItem>
+        <NavItem to="/" icon={HomeIcon} end onNavigate={onClose}>Home</NavItem>
 
         <SectionLabel>Channels</SectionLabel>
         <div className="space-y-0.5">
           {channels.map((c) => (
-            <NavItem key={c.id} to={`/channels/${c.id}`} icon={c.roles.length < 3 ? LockIcon : HashIcon}>
+            <NavItem key={c.id} to={`/channels/${c.id}`} icon={c.roles.length < 3 ? LockIcon : HashIcon} onNavigate={onClose}>
               {c.name}
             </NavItem>
           ))}
@@ -71,7 +72,7 @@ function Sidebar({ onClose }) {
         <SectionLabel>Settings</SectionLabel>
         <div className="space-y-0.5">
           {settings.map((s) => (
-            <NavItem key={s.to} to={s.to} icon={s.icon}>{s.label}</NavItem>
+            <NavItem key={s.to} to={s.to} icon={s.icon} onNavigate={onClose}>{s.label}</NavItem>
           ))}
         </div>
       </nav>

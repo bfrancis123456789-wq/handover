@@ -41,7 +41,7 @@ export default function Profile() {
       return setMsg({ kind: 'error', text: 'That photo is too large. Choose one under 5 MB.' })
     }
     const path = `${user.id}/avatar-${Date.now()}.${fileExtension(file)}`
-    const { error } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type, upsert: true })
+    const { error } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type })
     if (error) {
       setUploading(false)
       return setMsg({ kind: 'error', text: 'The photo could not be uploaded. Try again.' })

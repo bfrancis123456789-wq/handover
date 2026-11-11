@@ -12,7 +12,7 @@ import Notice from '../components/Notice'
 import Spinner from '../components/Spinner'
 import { ChatIcon, HashIcon, HeartIcon, ImageIcon, LockIcon, SendIcon, XIcon } from '../components/Icons'
 
-const MESSAGE_SELECT = 'id, channel, content, image_url, created_at, author_id, author:profiles(id, display_name, avatar_url, role), likes(user_id)'
+const MESSAGE_SELECT = 'id, channel, content, image_url, created_at, author_id, author:profiles!messages_author_id_fkey(id, display_name, avatar_url, role), likes(user_id)'
 const PAGE_SIZE = 100
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 

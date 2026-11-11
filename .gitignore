@@ -5,3 +5,6 @@ dist
 .env.*.local
 supabase/.temp
 .DS_Store
+supabase/functions/.env
+e2e/out
+*.zip
