@@ -1,3 +1,5 @@
+<p align="center"><img src="public/brand/handover-logo-full.png" alt="Handover" width="320"></p>
+
 # Handover
 
 Keep every shift on the same page. Handover is a workplace chat app for shift-based teams in hospitality, retail and hotels. It replaces messy group chats with role-based channels, and uses AI to turn the last 24 hours of messages into a short shift brief.
@@ -46,7 +48,7 @@ Keep every shift on the same page. Handover is a workplace chat app for shift-ba
    npm run dev
    ```
 
-To use your own logo, replace `public/logo.svg` and the PNG icons in `public/icons/` and `public/apple-touch-icon.png`. To change the support address, edit `SUPPORT_EMAIL` in `src/lib/constants.js`.
+Brand files live in `public/brand/` (app icon, mark and full logo). The app uses `public/logo.png` and `public/favicon.png`, and phones use `public/icons/` and `public/apple-touch-icon.png`. To change the support address, edit `SUPPORT_EMAIL` in `src/lib/constants.js`.
 
 ## Before going live
 
