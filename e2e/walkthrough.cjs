@@ -68,8 +68,15 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? `  -> ${detail}` : ''}`)
 }
 
+const allUsers = []
 async function step(name, fn) {
-  try { await fn() } catch (e) { check(name, false, e.message.split('\n')[0]) }
+  try { await fn() } catch (e) {
+    check(name, false, e.message.split('\n')[0])
+    // Save every user's screen to help work out what went wrong.
+    for (const u of allUsers) {
+      await u.page.screenshot({ path: path.join(OUT, `fail-${name.replace(/\W+/g, '-')}-${u.label}.png`) }).catch(() => {})
+    }
+  }
 }
 
 async function newUser(browser, label, viewport = { width: 1280, height: 860 }) {
@@ -81,7 +88,9 @@ async function newUser(browser, label, viewport = { width: 1280, height: 860 }) 
   page.on('console', (m) => {
     if (m.type() === 'error' && !/Failed to load resource|WebSocket|status of 4\d\d/.test(m.text())) errors.push(`${label}: ${m.text()}`)
   })
-  return { ctx, page, label }
+  const user = { ctx, page, label }
+  allUsers.push(user)
+  return user
 }
 
 async function signup(page, name, mail, password = 'password123') {
@@ -197,12 +206,15 @@ async function makePng(browser, file, color, label) {
   // 5. Live chat between two people
   await step('live chat', async () => {
     await staff.page.click('nav >> text=Announcements')
+    await staff.page.waitForSelector('main h1:text-is("Announcements")')
     await staff.page.waitForSelector('text=No messages in Announcements yet', { timeout: 8000 }).catch(() => {})
     check('empty channel shows friendly empty state', await staff.page.isVisible('text=No messages in Announcements yet'))
     check('team member cannot post in Announcements and is told why',
       (await staff.page.isVisible('text=Only managers and supervisors can post in Announcements')) && !(await staff.page.isVisible('#chat-text')))
     await mgr.page.click('nav >> text=General')
+    await mgr.page.waitForSelector('main h1:text-is("General")')
     await staff.page.click('nav >> text=General')
+    await staff.page.waitForSelector('main h1:text-is("General")')
     await staff.page.fill('#chat-text', 'Fridge 3 is broken and leaking water')
     await staff.page.click('button:has-text("Post")')
     await staff.page.waitForSelector('article:has-text("Fridge 3 is broken")')
@@ -210,6 +222,12 @@ async function makePng(browser, file, color, label) {
     await mgr.page.waitForSelector('article:has-text("Fridge 3 is broken")', { timeout: 8000 })
     check('manager sees the new message live without refreshing', true)
     const card = mgr.page.locator('article', { hasText: 'Fridge 3 is broken' })
+    await staff.page.fill('#chat-text', 'Half-typed draft for General')
+    await staff.page.click('nav >> text=Team Member')
+    await staff.page.waitForSelector('main h1:text-is("Team Member")')
+    check('a draft does not follow you into another channel', (await staff.page.inputValue('#chat-text')) === '')
+    await staff.page.click('nav >> text=General')
+    await staff.page.waitForSelector('main h1:text-is("General")')
     check('message shows author name and Team Member badge',
       (await card.textContent()).includes('Sid Staff') && (await card.textContent()).includes('Team Member'))
   })
@@ -259,6 +277,7 @@ async function makePng(browser, file, color, label) {
   // 8. Brief respects channel access
   await step('brief access', async () => {
     await mgr.page.click('nav >> text=Management')
+    await mgr.page.waitForSelector('main h1:text-is("Management")')
     await mgr.page.fill('#chat-text', 'Till 2 was 20 pounds short on Friday')
     await mgr.page.click('button:has-text("Post")')
     await mgr.page.waitForSelector('article:has-text("Till 2")')
@@ -285,13 +304,14 @@ async function makePng(browser, file, color, label) {
   // 9. Role change takes effect live
   await step('role change', async () => {
     await mgr.page.click('nav >> text=Manage Team')
+    await mgr.page.waitForSelector('text=Team members')
     const row = mgr.page.locator('li', { hasText: 'Sid Staff' })
-    await row.locator('select').selectOption('supervisor')
+    await row.locator('select[id^="role-"]').selectOption('supervisor')
     await mgr.page.waitForSelector('text=Sid Staff is now a Supervisor')
     await staff.page.waitForSelector('nav >> text=Supervisors', { timeout: 8000 })
     check('promoted user sees Supervisors channel without reloading', true)
     const own = mgr.page.locator('li', { hasText: '(you)' })
-    await own.locator('select').selectOption('team_member')
+    await own.locator('select[id^="role-"]').selectOption('team_member')
     await mgr.page.waitForSelector('text=at least one manager')
     check('last manager cannot demote themselves', true)
   })
@@ -362,6 +382,7 @@ async function makePng(browser, file, color, label) {
     await outsider.page.click('button:has-text("Create workplace")')
     await outsider.page.click('button:has-text("Get Started")')
     await outsider.page.click('nav >> text=General')
+    await outsider.page.waitForSelector('main h1:text-is("General")')
     await outsider.page.waitForSelector('text=No messages in General yet')
     check('another workplace cannot see Harbour Hotel messages', true)
   })
@@ -394,6 +415,7 @@ async function makePng(browser, file, color, label) {
   await step('unread counts', async () => {
     await staff.page.click('nav >> text=Home')
     await mgr.page.click('nav >> text=Announcements')
+    await mgr.page.waitForSelector('main h1:text-is("Announcements")')
     await mgr.page.fill('#chat-text', 'Rota for next week is up')
     await mgr.page.click('button:has-text("Post")')
     await staff.page.waitForSelector('nav a:has-text("Announcements") [aria-label="1 unread"]', { timeout: 8000 })
@@ -401,6 +423,7 @@ async function makePng(browser, file, color, label) {
     check('Home channel card shows new count', await staff.page.isVisible('text=1 new'))
     check('browser tab shows unread total', (await staff.page.title()).startsWith('(1)'), await staff.page.title())
     await staff.page.click('nav >> text=Announcements')
+    await staff.page.waitForSelector('main h1:text-is("Announcements")')
     await staff.page.waitForSelector('article:has-text("Rota for next week")')
     check('opening the channel clears its badge', !(await staff.page.isVisible('nav a:has-text("Announcements") [aria-label$="unread"]')))
     await staff.page.reload()
@@ -412,7 +435,9 @@ async function makePng(browser, file, color, label) {
   // 17. Deleting messages
   await step('delete messages', async () => {
     await staff.page.click('nav >> text=General')
+    await staff.page.waitForSelector('main h1:text-is("General")')
     await mgr.page.click('nav >> text=General')
+    await mgr.page.waitForSelector('main h1:text-is("General")')
     await staff.page.fill('#chat-text', 'Oops wrong channel')
     await staff.page.click('button:has-text("Post")')
     await mgr.page.waitForSelector('article:has-text("Oops wrong channel")', { timeout: 8000 })
@@ -473,6 +498,7 @@ async function makePng(browser, file, color, label) {
          select '${wp}', 'team_member', '${author}', 'Older note ' || g, now() - interval '1 day' - (g || ' minutes')::interval
          from generate_series(1, 60) g;`)
     await staff.page.click('nav >> text=Team Member')
+    await staff.page.waitForSelector('main h1:text-is("Team Member")')
     await staff.page.waitForSelector('text=Show earlier messages', { timeout: 8000 })
     const firstCount = await staff.page.locator('article').count()
     await staff.page.click('text=Show earlier messages')
@@ -481,6 +507,7 @@ async function makePng(browser, file, color, label) {
     check('messages are grouped under date headings', await staff.page.isVisible('[role="separator"]:has-text("Yesterday")'))
     await staff.page.evaluate(() => { const f = document.querySelector('article').closest('.overflow-y-auto'); f.scrollTop = 0; f.dispatchEvent(new Event('scroll')) })
     await mgr.page.click('nav >> text=Team Member')
+    await mgr.page.waitForSelector('main h1:text-is("Team Member")')
     await mgr.page.fill('#chat-text', 'Can someone check the linen cupboard')
     await mgr.page.click('button:has-text("Post")')
     await staff.page.waitForSelector('button:has-text("1 new message")', { timeout: 8000 })
@@ -493,6 +520,7 @@ async function makePng(browser, file, color, label) {
   // 20. Removing a member and resetting the code
   await step('remove member and reset code', async () => {
     await mgr.page.click('nav >> text=Manage Team')
+    await mgr.page.waitForSelector('text=Team members')
     const row = mgr.page.locator('li', { hasText: 'Lee Lead' })
     await row.locator('button[aria-label="Remove Lee Lead"]').click()
     await row.locator('button:has-text("Remove")').last().click()
@@ -552,7 +580,104 @@ async function makePng(browser, file, color, label) {
     check('web app manifest and icons are served', m.name === 'Handover' && m.display === 'standalone' && icon.ok)
   })
 
-  // 23. Push notifications
+  // 23. Tracked issues carry over beyond 24 hours
+  await step('tracked issues', async () => {
+    const idOf = (who) => sql(`select id from auth.users where email = '${email(who)}';`)
+    const wp = sql(`select workplace_id from profiles where id = '${idOf('mia')}';`)
+    const issueWhere = (title) => `workplace_id = '${wp}' and title ilike '${title}%'`
+    // Skip the one-minute cooldown between steps, then refresh and wait for the result.
+    async function refresh(u) {
+      sql(`update summaries set created_at = now() - interval '5 minutes' where user_id = (select id from auth.users where email = '${email(u.label === 'manager' ? 'mia' : u.label === 'staff' ? 'sid' : 'lee')}');`)
+      await u.page.click('nav >> text=Home')
+      await u.page.waitForSelector('text=Your Shift Brief')
+      await u.page.click('button:has-text("Refresh Summary")')
+      await u.page.waitForFunction(() => !document.body.innerText.includes('Summarising'), null, { timeout: 15000 })
+      await u.page.waitForTimeout(400)
+    }
+    async function post(u, channel, text) {
+      await u.page.click(`nav >> text=${channel}`)
+      await u.page.waitForSelector(`main h1:text-is("${channel}")`)
+      await u.page.fill('#chat-text', text)
+      await u.page.click('button:has-text("Post")')
+      await u.page.waitForSelector(`article:has-text("${text.slice(0, 20)}")`)
+    }
+    if (await lead.page.isVisible('button:has-text("Get Started")')) await lead.page.click('button:has-text("Get Started")')
+
+    await post(mgr, 'General', 'Walk-in freezer door is broken and will not close')
+    await refresh(mgr)
+    await mgr.page.waitForSelector('[data-testid="critical"] li:has-text("Walk-in freezer")')
+    check('the brief records a new issue from the chat', true)
+    check('a new issue shows how long it has been open',
+      (await mgr.page.textContent('[data-testid="critical"] li:has-text("Walk-in freezer") [data-testid="issue-age"]')).includes('open under an hour'))
+
+    // Pretend it was raised three days ago: its message is now outside the 24-hour window.
+    sql(`update messages set created_at = now() - interval '3 days' where workplace_id = '${wp}' and content like 'Walk-in freezer%';
+         update issues set created_at = now() - interval '3 days' where ${issueWhere('Walk-in freezer')};`)
+    await post(staff, 'General', 'Bread delivery arriving at 7am tomorrow')
+    await refresh(staff)
+    const calls = await aiCalls()
+    const prompt = calls[calls.length - 1].body.messages[0].content
+    const issueBlock = (prompt.match(/<open_issues>([\s\S]*?)<\/open_issues>/) || [])[1] || ''
+    check('open issues are sent to the AI as context',
+      issueBlock.split('\n').some((l) => l.includes('open 3 days') && l.includes('Walk-in freezer')), issueBlock.slice(0, 200))
+    check('the freezer message itself is no longer in the 24-hour window', !/<messages>[\s\S]*Walk-in freezer[\s\S]*<\/messages>/.test(prompt))
+    await staff.page.waitForSelector('[data-testid="critical"] li:has-text("Walk-in freezer")')
+    check('an issue older than 24 hours stays on the brief with its age',
+      (await staff.page.textContent('[data-testid="critical"] li:has-text("Walk-in freezer") [data-testid="issue-age"]')) === 'open 3 days')
+    check('the same problem is not added twice', Number(sql(`select count(*) from issues where ${issueWhere('Walk-in freezer')}`)) === 1)
+    check('team members see issues but no resolve or assign controls', (await staff.page.locator('button:has-text("Mark resolved")').count()) === 0)
+
+    // Assign an owner from the brief.
+    const freezer = mgr.page.locator('[data-testid="critical"] li', { hasText: 'Walk-in freezer' })
+    await mgr.page.reload()
+    await freezer.locator('select').selectOption({ label: 'Sid Sparks' })
+    await staff.page.waitForSelector('[data-testid="critical"] li:has-text("Walk-in freezer") >> text=Owner: Sid Sparks', { timeout: 8000 })
+    check('a manager can assign an owner and everyone sees it live', true)
+
+    // A Management issue stays out of sight for team members, and they can't own it.
+    await post(mgr, 'Management', 'Office safe lock is broken')
+    await refresh(mgr)
+    await mgr.page.waitForSelector('[data-testid="critical"] li:has-text("Office safe")')
+    const safeOptions = await mgr.page.locator('[data-testid="critical"] li', { hasText: 'Office safe' }).locator('option').allTextContents()
+    check('only people who can see the channel are offered as owners', !safeOptions.includes('Sid Sparks'), safeOptions.join(', '))
+    await staff.page.reload()
+    await staff.page.waitForSelector('[data-testid="critical"]')
+    check('team members cannot see Management issues', !(await staff.page.isVisible('text=Office safe')))
+
+    // The AI resolves an issue when the chat says it is fixed.
+    await post(staff, 'General', 'Fixed the freezer door, it closes properly now')
+    await refresh(staff)
+    await staff.page.waitForSelector('[data-testid="resolved"] li:has-text("Walk-in freezer")')
+    check('the brief marks an issue resolved when the chat says it is fixed',
+      (await staff.page.textContent('[data-testid="resolved"] li:has-text("Walk-in freezer")')).includes('from the chat'))
+    await mgr.page.waitForSelector('[data-testid="resolved"] li:has-text("Walk-in freezer")', { timeout: 8000 })
+    check('resolved issues update live for others', !(await mgr.page.isVisible('[data-testid="critical"] li:has-text("Walk-in freezer")')))
+
+    // A supervisor resolves and reopens from the brief.
+    sql(`update profiles set role = 'supervisor' where id = '${idOf('lee')}';`)
+    await post(mgr, 'General', 'Spill on the lobby carpet near the lift')
+    await refresh(mgr)
+    await lead.page.reload()
+    await lead.page.click('button[aria-label="Open menu"]')
+    await lead.page.click('.fixed nav >> text="Home"')
+    const spill = lead.page.locator('[data-testid="critical"] li', { hasText: 'lobby carpet' })
+    await spill.locator('button:has-text("Mark resolved")').click()
+    await staff.page.waitForSelector('[data-testid="resolved"] li:has-text("lobby carpet") >> text=by Lee Lead', { timeout: 8000 })
+    check('a supervisor can mark an issue resolved from the brief', true)
+    await lead.page.locator('[data-testid="resolved"] li', { hasText: 'lobby carpet' }).locator('button:has-text("Reopen")').click()
+    await staff.page.waitForSelector('[data-testid="critical"] li:has-text("lobby carpet")', { timeout: 8000 })
+    check('a resolved issue can be reopened', true)
+
+    // Cost controls: nothing new in 24 hours means no AI call, but open issues still show.
+    sql(`update messages set created_at = now() - interval '2 days' where workplace_id = '${wp}';`)
+    const before = (await aiCalls()).length
+    await refresh(staff)
+    await staff.page.waitForSelector('text=No messages in the last 24 hours')
+    check('no AI call when nothing was posted in 24 hours', (await aiCalls()).length === before)
+    check('open issues still show when nothing new was posted', await staff.page.isVisible('[data-testid="critical"] li:has-text("lobby carpet")'))
+  })
+
+  // 24. Push notifications
   await step('push notifications', async () => {
     sql(`select vault.create_secret('${PUSH_FUNCTION_URL}', 'push_function_url') where not exists (select 1 from vault.secrets where name = 'push_function_url');
          select vault.create_secret('local-push-secret', 'push_webhook_secret') where not exists (select 1 from vault.secrets where name = 'push_webhook_secret');`)
@@ -580,6 +705,8 @@ async function makePng(browser, file, color, label) {
     check('turning on saves this device', subsOf('sid') === 1 && subsOf('mia') === 1)
 
     await mgr.page.click('nav >> text=General')
+
+    await mgr.page.waitForSelector('main h1:text-is("General")')
     await mgr.page.fill('#chat-text', 'Lift 2 is out of order, use the service lift')
     await mgr.page.click('button:has-text("Post")')
     const got = await waitPush(staff.page, 1)
@@ -592,6 +719,8 @@ async function makePng(browser, file, color, label) {
     check('the author is never notified', (await pushesFor(mgr.page)).length === 0)
 
     await mgr.page.click('nav >> text=Management')
+
+    await mgr.page.waitForSelector('main h1:text-is("Management")')
     await mgr.page.fill('#chat-text', 'Budget review on Friday')
     await mgr.page.click('button:has-text("Post")')
     await quiet()
@@ -600,6 +729,7 @@ async function makePng(browser, file, color, label) {
     await staff.page.click('#notify-general')
     await staff.page.waitForTimeout(500)
     await mgr.page.click('nav >> text=General')
+    await mgr.page.waitForSelector('main h1:text-is("General")')
     await mgr.page.fill('#chat-text', 'Bins collected early tomorrow')
     await mgr.page.click('button:has-text("Post")')
     await quiet()
@@ -608,6 +738,8 @@ async function makePng(browser, file, color, label) {
     await staff.page.waitForTimeout(500)
 
     await staff.page.click('nav >> text=General')
+
+    await staff.page.waitForSelector('main h1:text-is("General")')
     await staff.page.fill('#chat-text', 'Spill by the lobby doors, cleaning it now')
     await staff.page.click('button:has-text("Post")')
     const mgot = await waitPush(mgr.page, 1)

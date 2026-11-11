@@ -112,8 +112,14 @@ function EmptyState({ channel }) {
   )
 }
 
-export default function Chat() {
+// A fresh chat screen per channel, so a draft, attachment or half-finished post
+// can never carry over into a different channel.
+export default function ChatRoute() {
   const { channelId } = useParams()
+  return <Chat key={channelId} channelId={channelId} />
+}
+
+function Chat({ channelId }) {
   const { profile } = useAuth()
   const { markRead } = useUnread()
   const channel = channelById(channelId)

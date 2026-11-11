@@ -34,3 +34,12 @@ export function dayLabel(iso) {
   const sameYear = d.getFullYear() === now.getFullYear()
   return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', ...(sameYear ? {} : { year: 'numeric' }) })
 }
+
+// How long an issue has been open, e.g. "open 3 days".
+export function issueAge(iso, now = Date.now()) {
+  const hours = Math.floor((now - new Date(iso).getTime()) / 3_600_000)
+  if (hours < 1) return 'open under an hour'
+  if (hours < 24) return `open ${hours} hour${hours === 1 ? '' : 's'}`
+  const days = Math.floor(hours / 24)
+  return `open ${days} day${days === 1 ? '' : 's'}`
+}

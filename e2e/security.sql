@@ -195,6 +195,86 @@ reset role;
 select pg_temp.expect('a device that signs in as someone else moves to them',
   (select user_id from push_subscriptions where endpoint = 'https://push.example.com/staff') = '00000000-0000-0000-0000-0000000000d4');
 
+-- ---- Tracked issues ----
+reset role;
+create temp table ids as
+  select content, id from messages where content in ('manager general', 'mgmt secret', 'supervisor news', 'other secret', 'sup in supervisors');
+grant select on ids to authenticated;
+create function pg_temp.mid(c text) returns text language sql as $$ select id::text from pg_temp.ids where content = c $$;
+
+-- The brief's write path (service role) checks everything against the person it runs for.
+create temp table applied as select public.apply_brief_updates('00000000-0000-0000-0000-0000000000b2',
+  jsonb_build_array(
+    jsonb_build_object('title', 'General problem', 'severity', 'critical', 'source_message_ids', jsonb_build_array(pg_temp.mid('manager general')), 'already_resolved', false),
+    jsonb_build_object('title', 'Sneaky management issue', 'severity', 'critical', 'source_message_ids', jsonb_build_array(pg_temp.mid('mgmt secret')), 'already_resolved', false),
+    jsonb_build_object('title', 'Other workplace issue', 'severity', 'normal', 'source_message_ids', jsonb_build_array(pg_temp.mid('other secret')), 'already_resolved', false),
+    jsonb_build_object('title', 'Junk ids', 'severity', 'normal', 'source_message_ids', jsonb_build_array('not-a-uuid', 42), 'already_resolved', false)
+  ), '[]'::jsonb, '{}') as r;
+select pg_temp.expect('the brief creates an issue from a message the person can see',
+  exists (select 1 from issues where title = 'General problem' and channel = 'general' and status = 'open'));
+select pg_temp.expect('the brief cannot create issues from messages the person cannot see',
+  not exists (select 1 from issues where title in ('Sneaky management issue', 'Other workplace issue', 'Junk ids')));
+select public.apply_brief_updates('00000000-0000-0000-0000-0000000000b2',
+  jsonb_build_array(jsonb_build_object('title', 'General problem again', 'severity', 'normal', 'source_message_ids', jsonb_build_array(pg_temp.mid('manager general')), 'already_resolved', false)),
+  '[]'::jsonb, '{}');
+select pg_temp.expect('the same problem is not recorded twice',
+  not exists (select 1 from issues where title = 'General problem again'));
+select public.apply_brief_updates('00000000-0000-0000-0000-0000000000a1',
+  jsonb_build_array(jsonb_build_object('title', 'Mixed sources', 'severity', 'critical',
+    'source_message_ids', jsonb_build_array(pg_temp.mid('supervisor news'), pg_temp.mid('mgmt secret')), 'already_resolved', false)),
+  '[]'::jsonb, '{}');
+select pg_temp.expect('an issue takes the most restricted channel among its sources',
+  (select channel from issues where title = 'Mixed sources') = 'management');
+create temp table iss as select title, id from issues;
+grant select on iss to authenticated;
+select public.apply_brief_updates('00000000-0000-0000-0000-0000000000b2', '[]'::jsonb,
+  jsonb_build_array(jsonb_build_object('issue_id', (select id from pg_temp.iss where title = 'Mixed sources'), 'source_message_ids', '[]'::jsonb)), '{}');
+select pg_temp.expect('the brief cannot resolve issues the person cannot see',
+  (select status from issues where title = 'Mixed sources') = 'open');
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000b2');
+select pg_temp.expect('team members see issues from their channels only',
+  exists (select 1 from issues where title = 'General problem') and not exists (select 1 from issues where title = 'Mixed sources'));
+select pg_temp.expect_error('team members cannot add issues directly',
+  $$insert into issues (workplace_id, channel, title) values (my_workplace_id(), 'general', 'fake')$$);
+select pg_temp.expect_error('team members cannot edit issues directly',
+  $$update issues set status = 'resolved', resolved_at = now()$$);
+select pg_temp.expect_error('team members cannot delete issues',
+  $$delete from issues$$);
+select pg_temp.expect_error('team members cannot resolve issues',
+  format('select public.resolve_issue(%L)', (select id from pg_temp.iss where title = 'General problem')));
+select pg_temp.expect_error('team members cannot assign owners',
+  format('select public.assign_issue(%L, auth.uid())', (select id from pg_temp.iss where title = 'General problem')));
+select pg_temp.expect_error('signed-in users cannot call the brief''s write function',
+  $$select public.apply_brief_updates(auth.uid(), '[]'::jsonb, '[]'::jsonb, '{}')$$);
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000d4');
+select pg_temp.expect('another workplace sees none of Harbour''s issues', not exists (select 1 from issues));
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000c3');
+select public.resolve_issue((select id from pg_temp.iss where title = 'General problem'));
+select pg_temp.expect('a supervisor can resolve an issue',
+  (select status = 'resolved' and resolved_by = auth.uid() from issues where title = 'General problem'));
+select public.reopen_issue((select id from pg_temp.iss where title = 'General problem'));
+select pg_temp.expect('a supervisor can reopen an issue',
+  (select status = 'open' and resolved_at is null from issues where title = 'General problem'));
+select pg_temp.expect_error('a supervisor cannot resolve a Management issue',
+  format('select public.resolve_issue(%L)', (select id from pg_temp.iss where title = 'Mixed sources')));
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
+select pg_temp.expect_error('owners must be able to see the issue''s channel',
+  format('select public.assign_issue(%L, %L)', (select id from pg_temp.iss where title = 'Mixed sources'), '00000000-0000-0000-0000-0000000000b2'));
+select pg_temp.expect_error('owners must be in the workplace',
+  format('select public.assign_issue(%L, %L)', (select id from pg_temp.iss where title = 'General problem'), '00000000-0000-0000-0000-0000000000d4'));
+select public.assign_issue((select id from pg_temp.iss where title = 'General problem'), '00000000-0000-0000-0000-0000000000b2');
+select pg_temp.expect('a manager can assign an owner who can see the channel',
+  (select owner_id from issues where title = 'General problem') = '00000000-0000-0000-0000-0000000000b2');
+reset role;
+select public.apply_brief_updates('00000000-0000-0000-0000-0000000000a1', '[]'::jsonb,
+  jsonb_build_array(jsonb_build_object('issue_id', (select id from pg_temp.iss where title = 'Mixed sources'), 'source_message_ids', jsonb_build_array(pg_temp.mid('mgmt secret')))), '{}');
+select pg_temp.expect('the brief can resolve an issue the person can see, recording the message',
+  (select status = 'resolved' and resolved_by is null and resolution_message_ids <> '{}' from issues where title = 'Mixed sources'));
+
 -- ---- Manager ----
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
 select pg_temp.expect('my_channels() gives a manager all five channels',

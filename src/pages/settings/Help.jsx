@@ -8,6 +8,7 @@ const FAQ = [
   { q: 'Why can\'t I see the Supervisors or Management channel?', a: 'Those channels are limited by role. Supervisors see the Supervisors channel, and only managers see Management. Ask a manager if your role should change.' },
   { q: 'What is the Shift Brief?', a: 'On Home, Refresh Summary reads the last 24 hours of messages in the channels you can access and lists critical issues, ongoing items, what was resolved and the next priorities. It only uses channels you are allowed to see.' },
   { q: 'Why can\'t I post in Announcements?', a: 'Announcements is for important news from managers and supervisors, so it stays easy to read. Everyone can read it. To share something there, ask your supervisor or manager.' },
+  { q: 'Why does an issue stay on the brief for days?', a: 'Problems stay on the brief until they are fixed, so nothing gets forgotten between shifts. Each one shows how long it has been open and who owns it. It is marked resolved when someone posts that it is fixed and the brief is refreshed, or when a supervisor or manager taps Mark resolved.' },
   { q: 'Who can see my messages?', a: 'Only people in your workplace who have access to the channel you posted in. Other workplaces can never see your data.' },
   { q: 'How do I save a photo someone posted?', a: 'Tap the photo to open it full screen, then tap Save.' },
   { q: 'How do I leave a workplace?', a: 'Go to Account and tap Leave Workplace. If you are the only manager, make someone else a manager first.' },
