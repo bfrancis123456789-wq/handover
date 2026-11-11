@@ -8,6 +8,7 @@ import Logo from './Logo'
 import RoleBadge from './RoleBadge'
 import WelcomeDialog from './WelcomeDialog'
 import Spinner from './Spinner'
+import { syncPushSubscription } from '../lib/push'
 import {
   BellIcon, HashIcon, HelpIcon, HomeIcon, KeyIcon, LockIcon, LogoutIcon, MenuIcon, UserIcon, UsersIcon, XIcon,
 } from './Icons'
@@ -115,6 +116,7 @@ function LayoutInner() {
   const anyUnread = Object.entries(counts).some(([ch, n]) => n > 0 && profile.notification_settings?.[ch] !== false)
 
   useEffect(() => setOpen(false), [location.pathname])
+  useEffect(() => { syncPushSubscription() }, [profile.id])
 
   return (
     <div className="flex h-full">

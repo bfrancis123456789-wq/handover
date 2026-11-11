@@ -15,6 +15,51 @@ const SERVICE_KEY = process.env.SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI
 const sql = (q) => execSync(`docker exec -i supabase_db_handover psql -U postgres -tA`, { input: q }).toString().trim()
 const run = Date.now().toString(36)
 const email = (n) => `${n}.${run}@example.com`
+const { decrypt } = require('./webpush-decrypt.cjs')
+const FAKE_PUSH = process.env.FAKE_PUSH || 'http://127.0.0.1:4020'
+// Vault settings that point the database trigger at the local send-push function.
+const PUSH_FUNCTION_URL = process.env.PUSH_FUNCTION_URL || 'http://172.18.0.1:8001'
+
+// Browsers here cannot reach real push services, so each test browser gets a
+// stand-in subscription with real encryption keys, pointed at the fake push service.
+const PUSH_STUB = `(() => {
+  if (!('PushManager' in window)) return;
+  const host = ${JSON.stringify(FAKE_PUSH)};
+  const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+  const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)).buffer;
+  const wrap = (d) => ({
+    endpoint: d.endpoint, expirationTime: null,
+    getKey: (n) => unb64(n === 'p256dh' ? d.pub : d.auth),
+    toJSON: () => ({ endpoint: d.endpoint, expirationTime: null, keys: { p256dh: d.pub, auth: d.auth } }),
+    unsubscribe: async () => { localStorage.removeItem('__fakePush'); return true; },
+  });
+  const load = () => { try { return JSON.parse(localStorage.getItem('__fakePush')); } catch { return null; } };
+  // Headless Chrome always reports "denied"; act like a person who taps Allow on the prompt.
+  Object.defineProperty(Notification, 'permission', { configurable: true, get: () => localStorage.getItem('__fakePerm') || 'default' });
+  Notification.requestPermission = async () => { localStorage.setItem('__fakePerm', 'granted'); return 'granted'; };
+  PushManager.prototype.getSubscription = async function () { const d = load(); return d ? wrap(d) : null; };
+  PushManager.prototype.subscribe = async function () {
+    const existing = load(); if (existing) return wrap(existing);
+    const kp = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const d = {
+      endpoint: host + '/push/' + crypto.randomUUID(),
+      pub: b64(await crypto.subtle.exportKey('raw', kp.publicKey)),
+      auth: b64(crypto.getRandomValues(new Uint8Array(16))),
+      jwk: await crypto.subtle.exportKey('jwk', kp.privateKey),
+    };
+    localStorage.setItem('__fakePush', JSON.stringify(d));
+    return wrap(d);
+  };
+})();`
+
+async function pushesFor(page) {
+  const sub = await page.evaluate(() => JSON.parse(localStorage.getItem('__fakePush') || 'null'))
+  if (!sub) return []
+  const id = sub.endpoint.split('/').pop()
+  const all = await fetch(`${FAKE_PUSH}/__pushes`).then((r) => r.json())
+  return all.filter((p) => p.id === id).map((p) => ({ ...p, payload: decrypt(p.body, sub) }))
+}
+
 const results = []
 const errors = []
 
@@ -29,6 +74,8 @@ async function step(name, fn) {
 
 async function newUser(browser, label, viewport = { width: 1280, height: 860 }) {
   const ctx = await browser.newContext({ viewport, acceptDownloads: true })
+  await ctx.grantPermissions(['notifications'])
+  await ctx.addInitScript(PUSH_STUB)
   const page = await ctx.newPage()
   page.on('pageerror', (e) => errors.push(`${label}: ${e.message}`))
   page.on('console', (m) => {
@@ -503,6 +550,95 @@ async function makePng(browser, file, color, label) {
     const m = await fetch(`${BASE}/manifest.webmanifest`).then((x) => x.json())
     const icon = await fetch(`${BASE}${m.icons[1].src}`)
     check('web app manifest and icons are served', m.name === 'Handover' && m.display === 'standalone' && icon.ok)
+  })
+
+  // 23. Push notifications
+  await step('push notifications', async () => {
+    sql(`select vault.create_secret('${PUSH_FUNCTION_URL}', 'push_function_url') where not exists (select 1 from vault.secrets where name = 'push_function_url');
+         select vault.create_secret('local-push-secret', 'push_webhook_secret') where not exists (select 1 from vault.secrets where name = 'push_webhook_secret');`)
+    await fetch(`${FAKE_PUSH}/__pushes`, { method: 'DELETE' })
+    const waitPush = async (page, n, ms = 10000) => {
+      const end = Date.now() + ms
+      while (Date.now() < end) { const p = await pushesFor(page); if (p.length >= n) return p; await new Promise((r) => setTimeout(r, 300)) }
+      return pushesFor(page)
+    }
+    const quiet = () => new Promise((r) => setTimeout(r, 3500))
+    const subsOf = (who) => Number(sql(`select count(*) from push_subscriptions s join auth.users u on u.id = s.user_id where u.email = '${email(who)}';`))
+
+    for (const u of [staff, mgr]) {
+      await u.page.click('nav >> text=Notifications')
+      await u.page.waitForSelector('[data-testid="push-status"][data-status="off"]')
+    }
+    check('Notifications page explains the iPhone Home Screen step', await staff.page.isVisible('text=Add to Home Screen') && await staff.page.isVisible('text=Using an iPhone or iPad?'))
+    check('old "coming later" text is gone', !(await staff.page.isVisible('text=coming later')))
+    if ((await staff.page.getAttribute('#notify-general', 'aria-checked')) === 'false') await staff.page.click('#notify-general')
+
+    await staff.page.click('button:has-text("Turn on notifications")')
+    await staff.page.waitForSelector('[data-testid="push-status"][data-status="on"]')
+    await mgr.page.click('button:has-text("Turn on notifications")')
+    await mgr.page.waitForSelector('[data-testid="push-status"][data-status="on"]')
+    check('turning on saves this device', subsOf('sid') === 1 && subsOf('mia') === 1)
+
+    await mgr.page.click('nav >> text=General')
+    await mgr.page.fill('#chat-text', 'Lift 2 is out of order, use the service lift')
+    await mgr.page.click('button:has-text("Post")')
+    const got = await waitPush(staff.page, 1)
+    const p = got[0]
+    check('staff gets a push for a new General message', !!p && p.payload.body.includes('Lift 2') && p.payload.title === 'Mia Manager in General' && p.payload.url === '/channels/general',
+      p ? JSON.stringify(p.payload) : 'no push')
+    check('push is encrypted and signed with VAPID',
+      !!p && p.headers['content-encoding'] === 'aes128gcm' && /^vapid t=/.test(p.headers.authorization || '') && Number(p.headers.ttl) > 0)
+    await quiet()
+    check('the author is never notified', (await pushesFor(mgr.page)).length === 0)
+
+    await mgr.page.click('nav >> text=Management')
+    await mgr.page.fill('#chat-text', 'Budget review on Friday')
+    await mgr.page.click('button:has-text("Post")')
+    await quiet()
+    check('no push to people who cannot access the channel', (await pushesFor(staff.page)).length === 1)
+
+    await staff.page.click('#notify-general')
+    await staff.page.waitForTimeout(500)
+    await mgr.page.click('nav >> text=General')
+    await mgr.page.fill('#chat-text', 'Bins collected early tomorrow')
+    await mgr.page.click('button:has-text("Post")')
+    await quiet()
+    check('a channel switched off in Notifications sends no push', (await pushesFor(staff.page)).length === 1)
+    await staff.page.click('#notify-general')
+    await staff.page.waitForTimeout(500)
+
+    await staff.page.click('nav >> text=General')
+    await staff.page.fill('#chat-text', 'Spill by the lobby doors, cleaning it now')
+    await staff.page.click('button:has-text("Post")')
+    const mgot = await waitPush(mgr.page, 1)
+    check('manager gets a push when staff post', mgot.length === 1 && mgot[0].payload.title === 'Sid Sparks in General', mgot[0] ? mgot[0].payload.title : 'none')
+
+    const staffId = sql(`select id from auth.users where email = '${email('sid')}';`)
+    const ecdh = require('crypto').createECDH('prime256v1'); ecdh.generateKeys()
+    const goneKey = ecdh.getPublicKey().toString('base64url')
+    const goneAuth = require('crypto').randomBytes(16).toString('base64url')
+    sql(`insert into push_subscriptions (user_id, endpoint, p256dh, auth) values ('${staffId}', '${FAKE_PUSH}/push/gone-${run}', '${goneKey}', '${goneAuth}');`)
+    await mgr.page.fill('#chat-text', 'Fire door on level 3 propped open again')
+    await mgr.page.click('button:has-text("Post")')
+    await waitPush(staff.page, 2)
+    await new Promise((r) => setTimeout(r, 1500))
+    check('expired devices are cleaned up automatically', Number(sql(`select count(*) from push_subscriptions where endpoint like '%gone-${run}'`)) === 0)
+
+    const staffEndpointId = (await staff.page.evaluate(() => JSON.parse(localStorage.getItem('__fakePush')).endpoint)).split('/').pop()
+    const countFor = async (id) => (await fetch(`${FAKE_PUSH}/__pushes`).then((r) => r.json())).filter((x) => x.id === id).length
+    const beforeOff = await countFor(staffEndpointId)
+    await staff.page.click('nav >> text=Notifications')
+    await staff.page.click('button:has-text("Turn off")')
+    await staff.page.waitForSelector('[data-testid="push-status"][data-status="off"]')
+    check('turning off removes this device', subsOf('sid') === 0)
+    await mgr.page.fill('#chat-text', 'Last orders at 10pm tonight')
+    await mgr.page.click('button:has-text("Post")')
+    await quiet()
+    check('no push after turning off', (await countFor(staffEndpointId)) === beforeOff)
+
+    await mgr.page.click('button[aria-label="Sign out"]')
+    await mgr.page.waitForSelector('#login-email')
+    check('signing out stops notifications to that device', subsOf('mia') === 0)
   })
 
   check('no browser errors during the walkthrough', errors.length === 0, errors.slice(0, 5).join(' | '))

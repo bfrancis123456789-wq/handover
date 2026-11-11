@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { forgetDevice } from '../lib/push'
 
 const AuthContext = createContext(null)
 
@@ -80,7 +81,10 @@ export function AuthProvider({ children }) {
     refresh: () => loadProfile(userId),
     noteLeft: (name) => setLeftWorkplace(name),
     updateProfileLocal: (patch) => setProfile((prev) => ({ ...prev, ...patch })),
-    signOut: () => supabase.auth.signOut(),
+    signOut: async () => {
+      await forgetDevice()
+      return supabase.auth.signOut()
+    },
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

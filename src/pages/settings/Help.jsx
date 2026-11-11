@@ -14,6 +14,7 @@ const FAQ = [
   { q: 'Can I delete a message?', a: 'Yes. Tap the bin icon on your own message and confirm. Managers can delete any message, for example if something was posted in the wrong place.' },
   { q: 'Someone has left the team. How do I remove them?', a: 'Managers can open Manage Team and tap the bin icon next to the person. If the join code was shared outside your team, tap Reset code there too.' },
   { q: 'How do I put Handover on my phone\'s home screen?', a: 'On iPhone, open Handover in Safari, tap Share, then Add to Home Screen. On Android, open it in Chrome, tap the menu, then Install app or Add to Home screen.' },
+  { q: 'How do I get notifications on my phone?', a: 'Open Notifications in Settings and tap Turn on notifications, then allow them when your phone asks. On iPhone and iPad, add Handover to your Home Screen first and open it from there. You can switch individual channels off on the same page, and you are never notified about your own messages.' },
   { q: 'I forgot my password.', a: 'On the sign-in screen, tap Forgot password? and enter your email. We will send you a link to choose a new one.' },
 ]
 

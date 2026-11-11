@@ -24,7 +24,8 @@ Keep every shift on the same page. Handover is a workplace chat app for shift-ba
 **Team and account**
 - Create a workplace (you become the manager) or join with a 6-character code
 - Managers change roles, remove people who have left, and reset the join code
-- Profile photo and name, notification settings, change email or password, forgot password, leave workplace
+- Push notifications on phones and computers for new messages, with per-channel on/off, never for your own messages, and only for channels you can see
+- Profile photo and name, change email or password, forgot password, leave workplace
 - Welcome dialog on first login, with different text for managers and staff
 - Installable on phones (Add to Home Screen) with its own icon
 
@@ -50,6 +51,25 @@ Keep every shift on the same page. Handover is a workplace chat app for shift-ba
 
 Brand files live in `public/brand/` (app icon, mark and full logo). The app uses `public/logo.png` and `public/favicon.png`, and phones use `public/icons/` and `public/apple-touch-icon.png`. To change the support address, edit `SUPPORT_EMAIL` in `src/lib/constants.js`.
 
+## Push notifications
+
+1. Create VAPID keys once: `npx web-push generate-vapid-keys`
+2. Put the **public** key in the front end's `.env.local` as `VITE_VAPID_PUBLIC_KEY`.
+3. Deploy the sender and give it its secrets (choose any long random string for the webhook secret):
+   ```bash
+   supabase functions deploy send-push --no-verify-jwt
+   supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=mailto:you@yourdomain.com PUSH_WEBHOOK_SECRET=...
+   ```
+4. Tell the database where to send new-message events. In the SQL editor:
+   ```sql
+   select vault.create_secret('https://<project-ref>.supabase.co/functions/v1/send-push', 'push_function_url');
+   select vault.create_secret('<the same webhook secret>', 'push_webhook_secret');
+   ```
+
+Until step 4 is done, nothing is sent. On iPhone and iPad, push only works once Handover has been added to the Home Screen (iOS 16.4 or later); the Notifications page explains this to staff.
+
+How it works: when a message is posted, a database trigger calls `send-push` with the shared secret. The function asks `push_recipients()` who should be notified (same workplace, can access the channel, channel switched on, not the author), encrypts a notification for each of their devices, and removes devices that have expired.
+
 ## Before going live
 
 - **Authentication > URL Configuration:** set the Site URL to your app's address, and add `https://your-domain/**` to Redirect URLs. Password reset links won't work without this.
@@ -72,13 +92,15 @@ All rules live in the database, so the interface cannot bypass them.
 | The only manager can't leave while others remain | `leave_workplace()`. If they are the last person left, the workplace is deleted |
 | Message photos are private | `message-images` bucket, path `<workplace>/<channel>/<file>`, served through signed URLs |
 | Each person's brief only uses channels they can read | the Edge Function queries with the caller's token, so RLS applies |
+| People see and remove only their own push devices; devices are saved through a checked function | `push_subscriptions` policies and `save_push_subscription()` |
+| Push goes only to people in the workplace who can access the channel, have it switched on, and didn't write the message | `push_recipients()`, callable only by the `send-push` function (service role) |
 
 ## Testing
 
 Two test suites run against a local Supabase stack (needs Docker and the Supabase CLI):
 
-- `e2e/walkthrough.cjs`: 76 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, phone layout and more.
-- `e2e/security.sql`: 25 checks that act as different users directly against the database, proving the rules hold even without the app.
+- `e2e/walkthrough.cjs`: 89 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, push notifications (decrypted to check who received what), phone layout and more.
+- `e2e/security.sql`: 38 checks that act as different users directly against the database, proving the rules hold even without the app.
 
 ```bash
 supabase start

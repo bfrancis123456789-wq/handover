@@ -7,7 +7,7 @@
 begin;
 
 create temp table results (name text, ok boolean);
-grant all on results to authenticated;
+grant all on results to authenticated, anon;
 grant all on all tables in schema pg_temp to authenticated;
 
 -- Helpers: act as a user, and expect a statement to succeed or fail.
@@ -128,6 +128,68 @@ select pg_temp.expect_error('another workplace''s manager cannot remove Harbour 
   $$select public.remove_member('00000000-0000-0000-0000-0000000000b2')$$);
 select pg_temp.expect('another workplace sees no Harbour read markers',
   not exists (select 1 from channel_reads where user_id <> auth.uid()));
+
+-- ---- Push notifications ----
+create temp table keys as select 'B' || repeat('A', 86) as p256dh, repeat('a', 22) as auth;
+grant select on keys to authenticated;
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000b2');
+select public.save_push_subscription('https://push.example.com/staff', (select p256dh from pg_temp.keys), (select auth from pg_temp.keys), 'test');
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000c3');
+select public.save_push_subscription('https://push.example.com/sup', (select p256dh from pg_temp.keys), (select auth from pg_temp.keys), 'test');
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
+select public.save_push_subscription('https://push.example.com/mgr', (select p256dh from pg_temp.keys), (select auth from pg_temp.keys), 'test');
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000d4');
+select public.save_push_subscription('https://push.example.com/out', (select p256dh from pg_temp.keys), (select auth from pg_temp.keys), 'test');
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000b2');
+select pg_temp.expect('people see only their own push devices',
+  (select count(*) from push_subscriptions) = 1 and (select endpoint from push_subscriptions) = 'https://push.example.com/staff');
+delete from push_subscriptions where endpoint = 'https://push.example.com/mgr';
+reset role;
+select pg_temp.expect('people cannot remove someone else''s device',
+  exists (select 1 from push_subscriptions where endpoint = 'https://push.example.com/mgr'));
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000b2');
+select pg_temp.expect_error('devices cannot be added for someone else directly',
+  $$insert into push_subscriptions (user_id, endpoint, p256dh, auth) values ('00000000-0000-0000-0000-0000000000a1', 'https://evil.example.com/x', 'x', 'y')$$);
+select pg_temp.expect_error('devices cannot be edited directly',
+  $$update push_subscriptions set endpoint = 'https://evil.example.com/x'$$);
+select pg_temp.expect_error('malformed push keys are rejected',
+  $$select public.save_push_subscription('https://push.example.com/bad', 'not-a-key', 'short', null)$$);
+select pg_temp.expect_error('signed-in users cannot ask who gets notified',
+  $$select * from public.push_recipients(gen_random_uuid())$$);
+select set_config('role', 'anon', true);
+select pg_temp.expect_error('signed-out visitors cannot save devices',
+  $$select public.save_push_subscription('https://push.example.com/anon', 'x', 'y', null)$$);
+
+reset role;
+create temp table msg_ids as
+  select content, id from messages where content in ('manager general', 'mgmt secret', 'supervisor news');
+with ins as (
+  insert into messages (workplace_id, channel, author_id, content)
+  select workplace_id, 'supervisors', '00000000-0000-0000-0000-0000000000c3', 'sup in supervisors'
+  from profiles where id = '00000000-0000-0000-0000-0000000000c3' returning id)
+insert into msg_ids select 'sup in supervisors', id from ins;
+create function pg_temp.recipients_of(c text) returns text[] language sql as $$
+  select coalesce(array_agg(endpoint order by endpoint), '{}') from public.push_recipients((select id from pg_temp.msg_ids where content = c))
+$$;
+select pg_temp.expect('manager''s General post notifies staff and supervisor, not the author or another workplace',
+  pg_temp.recipients_of('manager general') = array['https://push.example.com/staff', 'https://push.example.com/sup']);
+select pg_temp.expect('Management posts notify no one who lacks access',
+  pg_temp.recipients_of('mgmt secret') = '{}');
+select pg_temp.expect('Supervisors posts notify the manager but not team members',
+  pg_temp.recipients_of('sup in supervisors') = array['https://push.example.com/mgr']);
+select pg_temp.expect('supervisor''s Announcements post notifies everyone else in the workplace',
+  pg_temp.recipients_of('supervisor news') = array['https://push.example.com/mgr', 'https://push.example.com/staff']);
+update profiles set notification_settings = notification_settings || '{"general": false}' where id = '00000000-0000-0000-0000-0000000000b2';
+select pg_temp.expect('a channel switched off sends no push',
+  pg_temp.recipients_of('manager general') = array['https://push.example.com/sup']);
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000d4');
+select public.save_push_subscription('https://push.example.com/staff', (select p256dh from pg_temp.keys), (select auth from pg_temp.keys), 'shared phone');
+reset role;
+select pg_temp.expect('a device that signs in as someone else moves to them',
+  (select user_id from push_subscriptions where endpoint = 'https://push.example.com/staff') = '00000000-0000-0000-0000-0000000000d4');
 
 -- ---- Manager ----
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
