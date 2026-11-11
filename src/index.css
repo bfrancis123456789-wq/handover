@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-navy-950: #0d1629;
+  --color-navy-900: #14213d;
+  --color-navy-800: #1d2d4f;
+  --color-navy-700: #2a3d63;
+  --color-teal-brand: #20b2aa;
+  --color-teal-dark: #178f89;
+  --color-teal-soft: #e3f6f5;
+  --color-canvas: #f4f5f7;
+  --color-gold: #b8860b;
+  --color-gold-soft: #fbf3dc;
+}
+
+html, body, #root { height: 100%; }
+body { background: var(--color-canvas); color: #1f2937; -webkit-font-smoothing: antialiased; }
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-brand;
+}
+
+@layer components {
+  .btn-primary { @apply btn bg-teal-brand text-white hover:bg-teal-dark; }
+  .btn-secondary { @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50; }
+  .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700; }
+  .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-teal-brand focus:outline-none focus:ring-2 focus:ring-teal-brand/25; }
+  .label { @apply mb-1.5 block text-sm font-medium text-slate-700; }
+  .card { @apply rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
