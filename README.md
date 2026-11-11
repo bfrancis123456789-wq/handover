@@ -91,7 +91,7 @@ All rules live in the database, so the interface cannot bypass them.
 | The join code is only visible to managers | the column isn't granted to users; read through `get_join_code()` |
 | The only manager can't leave while others remain | `leave_workplace()`. If they are the last person left, the workplace is deleted |
 | Message photos are private | `message-images` bucket, path `<workplace>/<channel>/<file>`, served through signed URLs |
-| Each person's brief only uses channels they can read | the Edge Function queries with the caller's token, so RLS applies |
+| Each person's brief only uses channels they can read | the Edge Function queries with the caller's token, so RLS applies, and gets the channel list from `my_channels()` |
 | People see and remove only their own push devices; devices are saved through a checked function | `push_subscriptions` policies and `save_push_subscription()` |
 | Push goes only to people in the workplace who can access the channel, have it switched on, and didn't write the message | `push_recipients()`, callable only by the `send-push` function (service role) |
 
@@ -100,7 +100,7 @@ All rules live in the database, so the interface cannot bypass them.
 Two test suites run against a local Supabase stack (needs Docker and the Supabase CLI):
 
 - `e2e/walkthrough.cjs`: 89 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, push notifications (decrypted to check who received what), phone layout and more.
-- `e2e/security.sql`: 38 checks that act as different users directly against the database, proving the rules hold even without the app.
+- `e2e/security.sql`: 41 checks that act as different users directly against the database, proving the rules hold even without the app.
 
 ```bash
 supabase start

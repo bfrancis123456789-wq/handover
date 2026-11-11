@@ -21,12 +21,6 @@ const CHANNEL_LABELS: Record<string, string> = {
   management: "Management",
 };
 
-const ACCESS: Record<string, string[]> = {
-  team_member: ["general", "announcements", "team_member"],
-  supervisor: ["general", "announcements", "team_member", "supervisors"],
-  manager: ["general", "announcements", "team_member", "supervisors", "management"],
-};
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -96,7 +90,12 @@ Deno.serve(async (req) => {
     return json({ error: "Join a workplace before refreshing the brief." }, 400);
   }
 
-  const channels = ACCESS[profile.role] ?? ACCESS.team_member;
+  // Channel access comes from the database (my_channels() uses the same rule as
+  // the security policies), so there is no second copy of the rules here.
+  const { data: channels, error: channelsError } = await supabase.rpc("my_channels");
+  if (channelsError || !Array.isArray(channels) || channels.length === 0) {
+    return json({ error: "Could not work out your channels. Try again." }, 500);
+  }
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   // Newest messages first, so a very busy day keeps the most recent ones.
@@ -194,7 +193,7 @@ Deno.serve(async (req) => {
     next_priority: brief.next_priority ?? [],
     message_count: messages.length,
     role: profile.role,
-    channels: channels.map((c) => CHANNEL_LABELS[c]),
+    channels: channels.map((c: string) => CHANNEL_LABELS[c] ?? c),
   };
 
   const { data: saved, error: saveError } = await supabase

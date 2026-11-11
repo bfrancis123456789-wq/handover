@@ -74,6 +74,8 @@ select pg_temp.expect('staff sees only their workplace messages',
   (select bool_and(content <> 'other secret') from messages));
 select pg_temp.expect('staff cannot read Management',
   not exists (select 1 from messages where channel = 'management'));
+select pg_temp.expect('my_channels() gives a team member three channels',
+  public.my_channels() = array['general', 'announcements', 'team_member']);
 select pg_temp.expect('staff unread counts list only their channels',
   (select array_agg(channel order by channel) from unread_counts()) = array['announcements', 'general', 'team_member']);
 select pg_temp.expect('staff start caught up and see only newer messages as unread, not their own',
@@ -108,6 +110,8 @@ select pg_temp.expect_error('staff cannot write read markers directly',
 
 -- ---- Supervisor ----
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000c3');
+select pg_temp.expect('my_channels() adds Supervisors for a supervisor',
+  public.my_channels() = array['general', 'announcements', 'team_member', 'supervisors']);
 select pg_temp.expect('supervisor unread counts include Supervisors but not Management',
   (select array_agg(channel order by channel) from unread_counts()) = array['announcements', 'general', 'supervisors', 'team_member']);
 insert into messages (workplace_id, channel, author_id, content) values (my_workplace_id(), 'announcements', auth.uid(), 'supervisor news');
@@ -193,6 +197,8 @@ select pg_temp.expect('a device that signs in as someone else moves to them',
 
 -- ---- Manager ----
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
+select pg_temp.expect('my_channels() gives a manager all five channels',
+  public.my_channels() = array['general', 'announcements', 'team_member', 'supervisors', 'management']);
 select pg_temp.expect_error('manager cannot remove themselves',
   $$select public.remove_member(auth.uid())$$);
 delete from messages where content = 'mgmt secret';
