@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import { isConfigured } from './lib/supabase'
 import Layout from './components/Layout'
@@ -16,6 +16,8 @@ const Notifications = lazy(() => import('./pages/settings/Notifications'))
 const Account = lazy(() => import('./pages/settings/Account'))
 const Help = lazy(() => import('./pages/settings/Help'))
 const ManageTeam = lazy(() => import('./pages/settings/ManageTeam'))
+const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })))
+const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })))
 
 function FullScreenSpinner() {
   return (
@@ -41,6 +43,12 @@ function NotConfigured() {
 
 export default function App() {
   const { session, profile, loading, recovery } = useAuth()
+  const { pathname } = useLocation()
+
+  // The Privacy Policy and Terms open for everyone, signed in or not.
+  if (pathname === '/privacy' || pathname === '/terms') {
+    return <Suspense fallback={<FullScreenSpinner />}>{pathname === '/privacy' ? <Privacy /> : <Terms />}</Suspense>
+  }
 
   if (!isConfigured) return <NotConfigured />
   if (loading) return <FullScreenSpinner />

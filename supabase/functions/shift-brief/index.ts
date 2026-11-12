@@ -7,6 +7,8 @@
 // Secret:  supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 import Anthropic from "npm:@anthropic-ai/sdk@1";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { checkOrigin, jsonFor } from "../_shared/cors.ts";
+import { report, serve } from "../_shared/sentry.ts";
 
 const MODEL = "claude-haiku-5-5";
 const MAX_MESSAGES = 400; // most recent messages sent to the model
@@ -22,18 +24,6 @@ const CHANNEL_LABELS: Record<string, string> = {
   supervisors: "Supervisors",
   management: "Management",
 };
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
 
 const SYSTEM_PROMPT = `You are a shift handover assistant for a hospitality, retail or hotel team.
 You keep the team's list of open issues up to date from their chat, and set priorities for the next shift.
@@ -105,8 +95,10 @@ function age(iso: string) {
 
 const clean = (s: string, n: number) => (s ?? "").trim().replace(/\s+/g, " ").slice(0, n);
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+serve("shift-brief", async (req) => {
+  const blocked = checkOrigin(req);
+  if (blocked) return blocked;
+  const json = jsonFor(req);
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization");
@@ -168,7 +160,10 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: true })
       .limit(MAX_OPEN_ISSUES),
   ]);
-  if (messagesError || issuesError) return json({ error: "Could not load messages. Try again." }, 500);
+  if (messagesError || issuesError) {
+    await report(messagesError ?? issuesError, "shift-brief", { step: "load" });
+    return json({ error: "Could not load messages. Try again." }, 500);
+  }
 
   // Cost controls: no AI call when there is nothing new to read. Open issues are
   // read straight from the database by the app, so they stay visible regardless.
@@ -232,7 +227,7 @@ Deno.serve(async (req) => {
     if (!text || text.type !== "text") throw new Error("No text in response");
     brief = JSON.parse(text.text);
   } catch (err) {
-    console.error("Claude request failed", err);
+    await report(err, "shift-brief", { step: "claude" });
     if (err instanceof Anthropic.RateLimitError) {
       return json({ error: "Too many requests right now. Wait a minute and try again." }, 429);
     }
@@ -271,7 +266,7 @@ Deno.serve(async (req) => {
     p_still_open: stillOpen,
   });
   if (applyError) {
-    console.error("Saving issue updates failed", applyError);
+    await report(applyError, "shift-brief", { step: "apply_brief_updates" });
     return json({ error: "The brief could not be saved. Try again in a moment." }, 500);
   }
 
@@ -291,7 +286,7 @@ Deno.serve(async (req) => {
     .select("id, content, created_at")
     .single();
   if (saveError) {
-    console.error("Saving brief failed", saveError);
+    await report(saveError, "shift-brief", { step: "save_summary" });
     return json({ summary: { content, created_at: new Date().toISOString() } });
   }
 

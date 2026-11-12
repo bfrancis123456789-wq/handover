@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "bash e2e/run-ci.sh"
   },
   "dependencies": {
+    "@sentry/react": "^10.77.1",
     "@supabase/supabase-js": "^2.119.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -17,6 +19,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",
     "@vitejs/plugin-react": "^6.3.0",
+    "playwright": "^1.63.0",
     "tailwindcss": "^4.3.5",
     "vite": "^8.3.7"
   }

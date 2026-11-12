@@ -275,6 +275,40 @@ select public.apply_brief_updates('00000000-0000-0000-0000-0000000000a1', '[]'::
 select pg_temp.expect('the brief can resolve an issue the person can see, recording the message',
   (select status = 'resolved' and resolved_by is null and resolution_message_ids <> '{}' from issues where title = 'Mixed sources'));
 
+-- ---- Launch hardening ----
+reset role;
+insert into auth.users (id, email, raw_user_meta_data, aud, role) values
+  ('00000000-0000-0000-0000-0000000000e5', 'sec-guesser@example.com', '{"full_name":"Sec Guesser"}', 'authenticated', 'authenticated'),
+  ('00000000-0000-0000-0000-0000000000f6', 'sec-owner@example.com',   '{"full_name":"Sec Owner"}',   'authenticated', 'authenticated');
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000f6');
+create temp table owner_wp as select (public.create_workplace('Owner Test') ->> 'join_code') as c;
+grant select on owner_wp to authenticated;
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000e5');
+select pg_temp.expect('a wrong join code returns a clear error', (public.join_workplace('ZZZZZZ') ->> 'error') like 'That join code%');
+select public.join_workplace('ZZZZZ' || g) from generate_series(1, 9) g;
+select pg_temp.expect('after 10 wrong codes, even the right code is refused for an hour',
+  (public.join_workplace((select c from pg_temp.owner_wp)) ->> 'error') like 'Too many wrong codes%');
+select pg_temp.expect_error('people cannot read join attempts', $$select * from join_attempts$$);
+select pg_temp.expect_error('people cannot clear their join attempts', $$delete from join_attempts$$);
+
+reset role;
+delete from auth.users where id = '00000000-0000-0000-0000-0000000000f6';
+select pg_temp.expect('deleting the person who created a workplace keeps the workplace',
+  exists (select 1 from workplaces where name = 'Owner Test' and owner_id is null));
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000b2');
+create temp table my_export as select public.export_my_data() as d;
+select pg_temp.expect('Export my data returns your own account',
+  (select d -> 'account' ->> 'email' from my_export) = 'sec-staff@example.com');
+select pg_temp.expect('Export my data contains no one else''s messages',
+  not exists (select 1 from my_export, jsonb_array_elements(d -> 'messages') m where m ->> 'text' in ('manager general', 'mgmt secret', 'other secret')));
+select pg_temp.expect('Export my data leaves out device keys',
+  (select d::text from my_export) not like '%p256dh%');
+select set_config('role', 'anon', true);
+select pg_temp.expect_error('signed-out visitors cannot export data', $$select public.export_my_data()$$);
+
 -- ---- Manager ----
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
 select pg_temp.expect('my_channels() gives a manager all five channels',
@@ -292,13 +326,17 @@ select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
 select pg_temp.expect('reset join code changes the code',
   public.regenerate_join_code() <> (select c from code));
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000c3');
-select pg_temp.expect_error('old join code no longer works',
-  format('select public.join_workplace(%L)', (select c from code)));
+select pg_temp.expect('old join code no longer works',
+  (public.join_workplace((select c from code)) ->> 'error') is not null);
 select pg_temp.expect('removed member can no longer read Harbour messages',
   not exists (select 1 from messages));
 
 reset role;
 select case when ok then 'PASS' else 'FAIL' end || '  ' || name from results;
 select count(*) filter (where ok) || '/' || count(*) || ' security checks passed' from results;
+-- Exit with an error if anything failed, so CI stops.
+do $$ begin
+  if exists (select 1 from pg_temp.results where not ok) then raise exception 'Security checks failed'; end if;
+end $$;
 
 rollback;

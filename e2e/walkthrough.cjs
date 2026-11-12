@@ -17,6 +17,7 @@ const run = Date.now().toString(36)
 const email = (n) => `${n}.${run}@example.com`
 const { decrypt } = require('./webpush-decrypt.cjs')
 const FAKE_PUSH = process.env.FAKE_PUSH || 'http://127.0.0.1:4020'
+const FAKE_SENTRY = process.env.FAKE_SENTRY || 'http://127.0.0.1:4030'
 // Vault settings that point the database trigger at the local send-push function.
 const PUSH_FUNCTION_URL = process.env.PUSH_FUNCTION_URL || 'http://172.18.0.1:8001'
 
@@ -98,6 +99,7 @@ async function signup(page, name, mail, password = 'password123') {
   await page.fill('#signup-name', name)
   await page.fill('#signup-email', mail)
   await page.fill('#signup-password', password)
+  await page.check('#signup-terms')
   await page.click('button:has-text("Create account")')
   await page.waitForSelector('text=let\'s get you set up', { timeout: 10000 })
 }
@@ -144,7 +146,11 @@ async function makePng(browser, file, color, label) {
     check('short password is rejected with a message', await mgr.page.isVisible('text=at least 8 characters'))
     await mgr.page.fill('#signup-password', 'password123')
     await mgr.page.click('button:has-text("Create account")')
+    check('signup asks people to agree to the Terms and Privacy Policy', await mgr.page.isVisible('text=Tick the box to agree'))
+    await mgr.page.check('#signup-terms')
+    await mgr.page.click('button:has-text("Create account")')
     await mgr.page.waitForSelector('text=Hi Mia, let\'s get you set up')
+    check('agreeing records the terms version', /^\d{4}-\d{2}-\d{2}$/.test(sql(`select raw_user_meta_data->>'terms_version' from auth.users where email = '${email('mia')}';`)))
     check('signup leads to workplace setup with first name', true)
     await mgr.page.click('role=tab[name="Create a workplace"]')
     await mgr.page.fill('#workplace-name', 'Harbour Hotel')
@@ -771,6 +777,140 @@ async function makePng(browser, file, color, label) {
     await mgr.page.click('button[aria-label="Sign out"]')
     await mgr.page.waitForSelector('#login-email')
     check('signing out stops notifications to that device', subsOf('mia') === 0)
+  })
+
+  // 25. Privacy Policy, Terms, CORS and error monitoring
+  await step('launch readiness', async () => {
+    const visitor = await newUser(browser, 'visitor')
+    await visitor.page.goto(`${BASE}/login`)
+    await visitor.page.click('text=Privacy Policy')
+    await visitor.page.waitForSelector('h1:text-is("Privacy Policy")')
+    check('the Privacy Policy opens without signing in', await visitor.page.isVisible('text=Australian Privacy Principles'))
+    check('unfilled placeholders are highlighted', (await visitor.page.locator('mark').count()) > 0)
+    await visitor.page.goto(`${BASE}/terms`)
+    await visitor.page.waitForSelector('h1:text-is("Terms of Use")')
+    check('the Terms of Use open without signing in', await visitor.page.isVisible('text=Australian Consumer Law'))
+    await staff.page.goto(`${BASE}/privacy`)
+    await staff.page.waitForSelector('h1:text-is("Privacy Policy")')
+    check('signed-in people can open the Privacy Policy too', true)
+
+    const fn = process.env.SHIFT_BRIEF_URL || 'http://127.0.0.1:8000'
+    const evil = await fetch(fn, { method: 'OPTIONS', headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'POST' } })
+    check('functions refuse other websites (preflight)', evil.status === 403 && !evil.headers.get('access-control-allow-origin'))
+    const evilPost = await fetch(fn, { method: 'POST', headers: { Origin: 'https://evil.example', 'content-type': 'application/json' }, body: '{}' })
+    check('functions refuse requests from other websites', evilPost.status === 403)
+    const good = await fetch(fn, { method: 'OPTIONS', headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'POST' } })
+    check('functions allow the app\'s own address', good.status === 204 && good.headers.get('access-control-allow-origin') === 'http://localhost:5173')
+
+    const sentryEvents = () => fetch(`${FAKE_SENTRY}/__events`).then((r) => r.json())
+    await staff.page.goto(`${BASE}/settings/notifications?ref=secret-query#private-hash`)
+    await staff.page.waitForSelector('text=Notifications on this device')
+    await staff.page.evaluate(async (tag) => {
+      window.__handoverSentry.captureException(new Error(tag))
+      await window.__handoverSentry.flush(3000)
+    }, `e2e sentry check ${run}`)
+    await new Promise((r) => setTimeout(r, 500))
+    const fe = (await sentryEvents()).find((e) => e.project === '1' && e.raw.includes(`e2e sentry check ${run}`))
+    const staffId = sql(`select id from auth.users where email = '${email('sid')}';`)
+    check('front-end errors reach Sentry', !!fe)
+    check('front-end reports carry only the account id, no email or address details',
+      !!fe && JSON.stringify(fe.event.user) === JSON.stringify({ id: staffId }) && !fe.raw.includes(email('sid')) &&
+      !fe.raw.includes('secret-query') && !fe.raw.includes('private-hash'))
+
+    await staff.page.click('nav >> text=General')
+    await staff.page.waitForSelector('main h1:text-is("General")')
+    await staff.page.fill('#chat-text', 'Coffee machine making a grinding noise')
+    await staff.page.click('button:has-text("Post")')
+    await staff.page.waitForSelector('article:has-text("Coffee machine making")')
+    sql(`update summaries set created_at = now() - interval '5 minutes' where user_id = '${staffId}';`)
+    await fetch(`${FAKE_AI}/__fail_next`, { method: 'POST' })
+    await staff.page.click('nav >> text=Home')
+    await staff.page.click('button:has-text("Refresh Summary")')
+    await staff.page.waitForSelector('text=The brief could not be generated', { timeout: 20000 })
+    check('an AI outage shows a friendly message', true)
+    await new Promise((r) => setTimeout(r, 1500))
+    const be = (await sentryEvents()).find((e) => e.project === '2' && e.event.tags?.function === 'shift-brief')
+    check('Edge Function errors reach Sentry, tagged with the function', !!be)
+    check('Edge Function reports contain no message text or email', !!be && !be.raw.includes('Coffee machine') && !be.raw.includes(email('sid')))
+  })
+
+  // 26. Export my data and delete my account
+  await step('export and delete', async () => {
+    async function openSettings(u, name) {
+      if (await u.page.isVisible('button[aria-label="Open menu"]')) {
+        await u.page.click('button[aria-label="Open menu"]')
+        await u.page.click(`.fixed nav >> text="${name}"`)
+      } else {
+        await u.page.click(`nav >> text="${name}"`)
+      }
+      await u.page.waitForSelector(`main h1:text-is("${name}")`)
+    }
+    async function deleteAccount(u, alsoMessages) {
+      await openSettings(u, 'Account')
+      await u.page.click('button:has-text("Delete my account")')
+      if (alsoMessages) await u.page.check('#delete-messages')
+      await u.page.click('button:has-text("Yes, delete my account")')
+    }
+    const exists = (who) => sql(`select count(*) from auth.users where email = '${email(who)}';`) === '1'
+    const harbour = sql(`select workplace_id from profiles where id = (select id from auth.users where email = '${email('mia')}');`)
+
+    // Export
+    await openSettings(staff, 'Account')
+    const [download] = await Promise.all([
+      staff.page.waitForEvent('download', { timeout: 15000 }),
+      staff.page.click('button:has-text("Download my data")'),
+    ])
+    const file = JSON.parse(fs.readFileSync(await download.path(), 'utf8'))
+    check('Export my data downloads your account details', file.account?.email === email('sid') && file.workplace?.name === 'Harbour Hotel')
+    check('the export includes your own messages only',
+      file.messages.some((m) => m.text.includes('Fridge 3')) && !file.messages.some((m) => m.text.includes('Lift 2')))
+    check('the export leaves out device keys', !JSON.stringify(file).includes('p256dh'))
+
+    // The only manager can't delete their account while others remain.
+    await mgr.page.goto(`${BASE}/login`)
+    if (await mgr.page.isVisible('#login-email')) {
+      await mgr.page.fill('#login-email', email('mia'))
+      await mgr.page.fill('#login-password', 'password123')
+      await mgr.page.click('button:has-text("Sign in")')
+      await mgr.page.waitForSelector('text=Your Shift Brief')
+    }
+    await deleteAccount(mgr, false)
+    await mgr.page.waitForSelector('text=You are the only manager')
+    check('the only manager is asked to hand over before deleting', exists('mia'))
+
+    // A supervisor deletes their account and their messages.
+    await lead.page.goto(`${BASE}/channels/general`)
+    await lead.page.waitForSelector('main h1:text-is("General")')
+    await lead.page.fill('#chat-text', 'Lead note that should disappear')
+    await lead.page.click('button:has-text("Post")')
+    await lead.page.waitForSelector('article:has-text("Lead note that should")')
+    await deleteAccount(lead, true)
+    await lead.page.waitForSelector('text=Your account has been deleted', { timeout: 15000 })
+    check('deleting your account signs you out and confirms it', !exists('lee'))
+    check('choosing to delete your messages removes them',
+      sql(`select count(*) from messages where content like 'Lead note that should%';`) === '0')
+
+    // A team member deletes their account but leaves their messages for the team.
+    await deleteAccount(staff, false)
+    await staff.page.waitForSelector('text=Your account has been deleted', { timeout: 15000 })
+    await staff.page.fill('#login-email', email('sid'))
+    await staff.page.fill('#login-password', 'newpassword456')
+    await staff.page.click('button:has-text("Sign in")')
+    await staff.page.waitForSelector('text=do not match')
+    check('a deleted account can no longer sign in', !exists('sid'))
+    await mgr.page.goto(`${BASE}/channels/general`)
+    await mgr.page.waitForSelector('article:has-text("Fridge 3")')
+    check('kept messages show as from a former member',
+      (await mgr.page.textContent('article:has-text("Fridge 3")')).includes('Former member'))
+    check('the workplace and its data are untouched', sql(`select count(*) from workplaces where id = '${harbour}';`) === '1')
+
+    // The last person in a workplace can delete their account; the empty workplace goes too.
+    await outsider.page.goto(`${BASE}/settings/account`)
+    await outsider.page.waitForSelector('main h1:text-is("Account")')
+    await deleteAccount(outsider, false)
+    await outsider.page.waitForSelector('text=Your account has been deleted', { timeout: 15000 })
+    check('the last person can delete their account, removing the empty workplace',
+      !exists('oli') && sql(`select count(*) from workplaces where name = 'Other Cafe';`) === '0')
   })
 
   check('no browser errors during the walkthrough', errors.length === 0, errors.slice(0, 5).join(' | '))

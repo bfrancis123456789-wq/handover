@@ -46,7 +46,7 @@ export default function Help() {
       </div>
       <div className="card mt-6 p-5 sm:p-6">
         <h2 className="font-semibold text-navy-900">Still stuck?</h2>
-        <p className="mt-1 text-sm text-slate-500">Email us and we'll get back to you within one working day.</p>
+        <p className="mt-1 text-sm text-slate-500">Email us and we'll get back to you within one working day. You can also read our <a href="/privacy" className="font-medium text-teal-dark underline">Privacy Policy</a> and <a href="/terms" className="font-medium text-teal-dark underline">Terms of Use</a>.</p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <a href={`mailto:${SUPPORT_EMAIL}`} className="select-all font-medium text-teal-dark hover:underline">{SUPPORT_EMAIL}</a>
           <button onClick={copy} className="btn-secondary px-3 py-1.5 text-xs"><CopyIcon className="h-3.5 w-3.5" />{copied ? 'Copied' : 'Copy'}</button>

@@ -7,6 +7,7 @@
 // Secrets:  supabase secrets set PUSH_WEBHOOK_SECRET=... VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=mailto:you@example.com
 import webpush from "npm:web-push@3";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { report, serve } from "../_shared/sentry.ts";
 
 const CHANNEL_LABELS: Record<string, string> = {
   general: "General",
@@ -26,7 +27,7 @@ function sameSecret(a: string, b: string) {
   return diff === 0;
 }
 
-Deno.serve(async (req) => {
+serve("send-push", async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const secret = Deno.env.get("PUSH_WEBHOOK_SECRET") ?? "";
@@ -61,7 +62,7 @@ Deno.serve(async (req) => {
   ]);
   if (!message) return json({ sent: 0, reason: "message not found" });
   if (recipientsError) {
-    console.error("push_recipients failed", recipientsError);
+    await report(recipientsError, "send-push", { step: "push_recipients" });
     return json({ error: "Could not load recipients" }, 500);
   }
   if (!recipients?.length) return json({ sent: 0 });
@@ -105,9 +106,9 @@ Deno.serve(async (req) => {
     if (r.status === "fulfilled") {
       if (r.value.status === 404 || r.value.status === 410) gone.push(r.value.id);
       else if (r.value.status < 300) sent++;
-      else console.warn("push rejected", r.value.status);
+      else await report(new Error(`Push service rejected a notification (HTTP ${r.value.status})`), "send-push", { status: r.value.status });
     } else {
-      console.warn("push failed", r.reason);
+      await report(r.reason, "send-push", { step: "deliver" });
     }
   }
   if (gone.length) await admin.from("push_subscriptions").delete().in("id", gone);

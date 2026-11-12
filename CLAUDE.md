@@ -16,6 +16,7 @@ Mobile-first workplace chat for shift teams (hospitality, retail, hotels): role-
 - Tracked issues: only `shift-brief` writes AI updates, through `apply_brief_updates()` (service role; validates sources and visibility). People use `resolve_issue()`, `reopen_issue()`, `assign_issue()`. No direct table writes.
 - Edge Functions never hardcode access. `shift-brief` reads with the caller's token so RLS applies, gets the channel list from `my_channels()`, and uses the service role only for `apply_brief_updates()`. `send-push` uses the service role only to call `push_recipients()`.
 - Keep the brief's cost controls: no Claude call when nothing new was posted, a one-minute cooldown per person, and capped prompt size.
+- Every Edge Function uses `_shared/cors.ts` (only `ALLOWED_ORIGINS`; never `*`) and `_shared/sentry.ts` (`serve()` and `report()`; never send message text, emails or tokens).
 - `role` and `workplace_id` change only through RPCs (`create_workplace`, `join_workplace`, `set_member_role`, `remove_member`, `leave_workplace`). Users can't update those columns directly.
 - `src/lib/constants.js` (`CHANNELS`, `roles`, `postRoles`) mirrors the rules for display only: menu items, read-only notes. Change it in the same commit as the SQL.
 - Schema changes go in a new file in `supabase/migrations/`. Don't edit migrations that may already be deployed. Prove the full set with `supabase db reset`.
@@ -25,17 +26,7 @@ Mobile-first workplace chat for shift teams (hospitality, retail, hotels): role-
 - Every feature adds checks to `e2e/walkthrough.cjs` (real browsers, several users at once).
 - Anything touching data access also adds checks to `e2e/security.sql` (acts as each user directly against the database).
 - Both suites must pass before committing. Fix the cause, not the test, unless the test was wrong.
-- Local stand-ins: `e2e/fake-anthropic.mjs` (Claude API) and `e2e/fake-push.mjs` (push service; tests decrypt pushes to check recipients).
-
-```bash
-supabase start
-node e2e/fake-anthropic.mjs & node e2e/fake-push.mjs &
-npx vite --config e2e/vite.e2e.config.js     # app on :5173, proxies to the local stack
-node e2e/walkthrough.cjs
-docker exec -i supabase_db_handover psql -U postgres < e2e/security.sql
-```
-
-The README has the full setup, including how to run the Edge Functions locally.
+- Run both with `supabase start` then `npm run test:e2e` (`e2e/run-ci.sh`, also used by GitHub Actions). It starts stand-ins for Claude, the push service and Sentry, so no real keys are needed. Failures save screenshots to `e2e/out`.
 
 ## UI copy
 

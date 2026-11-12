@@ -29,6 +29,8 @@ Keep every shift on the same page. Handover is a workplace chat app for shift-ba
 - Managers change roles, remove people who have left, and reset the join code
 - Push notifications on phones and computers for new messages, with per-channel on/off, never for your own messages, and only for channels you can see
 - Profile photo and name, change email or password, forgot password, leave workplace
+- Export my data (a file with your profile, settings and messages) and Delete my account, with the option to delete your messages too
+- Privacy Policy and Terms of Use pages, agreed to at signup
 - Welcome dialog on first login, with different text for managers and staff
 - Installable on phones (Add to Home Screen) with its own icon
 
@@ -40,11 +42,13 @@ Keep every shift on the same page. Handover is a workplace chat app for shift-ba
    supabase link --project-ref <your-ref>
    supabase db push
    ```
-3. **Deploy the shift brief function and add your Anthropic key** (the key stays on the server and never reaches the browser):
+3. **Deploy the Edge Functions and their secrets** (keys stay on the server and never reach the browser). `ALLOWED_ORIGINS` is your app's address; browsers on any other site are refused:
    ```bash
-   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-... ALLOWED_ORIGINS=https://app.yourdomain.com.au
    supabase functions deploy shift-brief
+   supabase functions deploy delete-account
    ```
+   For more than one address (for example a staging site), separate them with commas.
 4. **Configure the front end:**
    ```bash
    cp .env.example .env.local   # add your project URL and anon key
@@ -73,11 +77,23 @@ Until step 4 is done, nothing is sent. On iPhone and iPad, push only works once 
 
 How it works: when a message is posted, a database trigger calls `send-push` with the shared secret. The function asks `push_recipients()` who should be notified (same workplace, can access the channel, channel switched on, not the author), encrypts a notification for each of their devices, and removes devices that have expired.
 
+## Error monitoring (Sentry)
+
+1. Create a Sentry project for the front end (React) and one for the Edge Functions (Deno), or use one for both.
+2. Front end: set `VITE_SENTRY_DSN` (and optionally `VITE_SENTRY_ENVIRONMENT`, `VITE_RELEASE`) in your hosting provider's environment settings.
+3. Edge Functions: `supabase secrets set SENTRY_DSN=... SENTRY_ENVIRONMENT=production`
+
+Reports include the error, a stack trace, the page path and the account ID. They never include names, email addresses, message text, request bodies or sign-in tokens (links are stripped before sending). Nothing is sent until a DSN is set.
+
+## Privacy Policy and Terms
+
+`/privacy` and `/terms` are drafts written with the Australian Privacy Act and Australian Consumer Law in mind. Fill in every bracketed value in `src/lib/legal.js` and in the pages themselves (anything unfilled is highlighted in yellow), then have a lawyer review both before launch. Change `TERMS_VERSION` in `src/lib/legal.js` when the documents change.
+
 ## Before going live
 
 - **Authentication > URL Configuration:** set the Site URL to your app's address, and add `https://your-domain/**` to Redirect URLs. Password reset links won't work without this.
 - **Authentication > SMTP Settings:** connect your own email provider (for example Resend, Postmark or SendGrid). Supabase's built-in email only sends a few messages per hour and is meant for testing, so signup confirmations and password resets will stall without it.
-- **Authentication > Providers > Email:** decide whether new accounts must confirm their email. The app handles both.
+- **Authentication > Providers > Email:** decide whether new accounts must confirm their email. The app handles both. Set the minimum password length to **8** to match the app (the hosted default is 6).
 - **Hosting:** `npm run build` produces a static site in `dist/` that you can host on Vercel, Netlify or similar. Set up a rewrite so every path serves `index.html`.
 
 ## How access is enforced
@@ -102,24 +118,19 @@ All rules live in the database, so the interface cannot bypass them.
 
 ## Testing
 
-Two test suites run against a local Supabase stack (needs Docker and the Supabase CLI):
+Two test suites run against a local Supabase stack (needs Docker, the Supabase CLI and Deno). GitHub Actions runs both on every push (`.github/workflows/ci.yml`), and uploads screenshots and logs if anything fails.
 
-- `e2e/walkthrough.cjs`: 106 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, push notifications (decrypted to check who received what), tracked issues carrying over beyond 24 hours, phone layout and more.
-- `e2e/security.sql`: 61 checks that act as different users directly against the database, proving the rules hold even without the app.
+- `e2e/walkthrough.cjs`: 130 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, push notifications (decrypted to check who received what), tracked issues carrying over beyond 24 hours, error reporting, CORS, exporting data, deleting accounts, phone layout and more.
+- `e2e/security.sql`: 70 checks that act as different users directly against the database, proving the rules hold even without the app.
+
+To run them on your machine:
 
 ```bash
 supabase start
-supabase functions serve --env-file supabase/functions/.env   # or run the function with Deno
-node e2e/fake-anthropic.mjs                                    # stand-in for the Claude API, no key needed
+npm run test:e2e
 ```
 
-Point the function at the stand-in by putting `ANTHROPIC_API_KEY=sk-ant-local-test` and `ANTHROPIC_BASE_URL=http://host.docker.internal:4010` in `supabase/functions/.env`. Then, in separate terminals:
-
-```bash
-npx vite --config e2e/vite.e2e.config.js
-node e2e/walkthrough.cjs
-docker exec -i supabase_db_handover psql -U postgres < e2e/security.sql
-```
+`e2e/run-ci.sh` starts stand-ins for Claude, the push service and Sentry (no real keys needed), runs each Edge Function with Deno, starts the app, then runs both suites.
 
 ## Project layout
 
@@ -133,6 +144,9 @@ src/
   pages/settings/           Profile, Notifications, Account, Help, ManageTeam
 supabase/
   migrations/               schema, security rules, functions, storage, realtime
-  functions/shift-brief/    Edge Function that calls Claude
-e2e/                        end-to-end and security tests
+  functions/shift-brief/    Edge Function that calls Claude and records issue updates
+  functions/send-push/      Edge Function that sends push notifications
+  functions/delete-account/ Edge Function that deletes an account
+  functions/_shared/        CORS and Sentry helpers
+e2e/                        end-to-end and security tests, stand-in services, CI script
 ```

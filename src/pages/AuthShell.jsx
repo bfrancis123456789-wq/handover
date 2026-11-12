@@ -15,6 +15,11 @@ export default function AuthShell({ title, subtitle, children, footer }) {
           <div className="mt-5">{children}</div>
         </div>
         {footer && <div className="mt-6 text-center text-sm text-slate-400">{footer}</div>}
+        <p className="mt-6 text-center text-xs text-slate-500">
+          <a href="/privacy" className="hover:text-slate-300 hover:underline">Privacy Policy</a>
+          <span aria-hidden="true"> · </span>
+          <a href="/terms" className="hover:text-slate-300 hover:underline">Terms of Use</a>
+        </p>
       </div>
     </div>
   )

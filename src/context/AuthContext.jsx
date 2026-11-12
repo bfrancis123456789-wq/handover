@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { forgetDevice } from '../lib/push'
+import { setMonitoringUser } from '../lib/monitoring'
 
 const AuthContext = createContext(null)
 
@@ -48,6 +49,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const userId = session?.user?.id
+  useEffect(() => { setMonitoringUser(userId) }, [userId])
   useEffect(() => {
     if (session === undefined) return
     loadProfile(userId)

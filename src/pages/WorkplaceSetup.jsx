@@ -17,12 +17,13 @@ export default function WorkplaceSetup() {
     e.preventDefault()
     setError('')
     setBusy(true)
-    const { error } =
+    const { data, error } =
       mode === 'create'
         ? await supabase.rpc('create_workplace', { p_name: name })
         : await supabase.rpc('join_workplace', { p_code: code })
     setBusy(false)
     if (error) return setError(error.message)
+    if (data?.error) return setError(data.error)
     await refresh()
   }
 

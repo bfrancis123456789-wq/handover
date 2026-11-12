@@ -8,6 +8,7 @@ import http from 'node:http'
 
 const port = Number(process.env.PORT || 4010)
 const calls = []
+let failRemaining = 0 // set by POST /__fail_next to simulate an outage (covers the SDK's retries)
 
 const CRITICAL = /broken|leak|fire|smoke|injur|complain|short|unsafe|spill/i
 const NORMAL = /waiting|ordered|booked|tomorrow|low on|out of|needs/i
@@ -51,6 +52,15 @@ http.createServer((req, res) => {
     if (req.url === '/__calls') {
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end(JSON.stringify(calls))
+    }
+    if (req.url === '/__fail_next') {
+      failRemaining = 3
+      res.writeHead(204); return res.end()
+    }
+    if (failRemaining > 0 && req.url.startsWith('/v1/messages')) {
+      failRemaining--
+      res.writeHead(500, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Simulated outage' } }))
     }
     if (req.method !== 'POST' || !req.url.startsWith('/v1/messages')) {
       res.writeHead(404); return res.end()

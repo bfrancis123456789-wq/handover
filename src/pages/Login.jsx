@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import Notice from '../components/Notice'
@@ -9,6 +9,12 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [deleted] = useState(() => {
+    try { return Boolean(sessionStorage.getItem('handover:account-deleted')) } catch { return false }
+  })
+  useEffect(() => {
+    try { sessionStorage.removeItem('handover:account-deleted') } catch { /* not critical */ }
+  }, [])
 
   async function submit(e) {
     e.preventDefault()
@@ -26,6 +32,7 @@ export default function Login() {
       footer={<>New to Handover? <Link to="/signup" className="font-semibold text-teal-brand hover:underline">Create an account</Link></>}
     >
       <form onSubmit={submit} className="space-y-4">
+        {deleted && <Notice kind="success">Your account has been deleted.</Notice>}
         <div>
           <label htmlFor="login-email" className="label">Email</label>
           <input id="login-email" type="email" autoComplete="email" required className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
