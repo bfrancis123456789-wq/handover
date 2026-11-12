@@ -53,7 +53,7 @@ Create two **environments** (Settings → Environments): `staging` and `producti
 | `SENTRY_DSN_FRONTEND` | front-end Sentry DSN |
 | `SITE_URL` | staging: `https://staging.<project>.pages.dev`; production: `https://app.yourdomain.com.au` |
 
-**Repository variable:** `CF_PAGES_PROJECT` is the Pages project name.
+**Repository variables:** `CF_PAGES_PROJECT` is the Pages project name. Set `DEPLOY_ENABLED` to `true` once everything on this page is in place. Until then, GitHub only runs the tests.
 
 ## 3. Each Supabase project (staging, then production)
 

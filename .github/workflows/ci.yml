@@ -3,6 +3,7 @@ name: CI and deploy
 # Pull requests: tests, then a preview site on Cloudflare Pages using the staging database.
 # Merges to main: tests, then staging (migrations, functions, site), then production
 # (encrypted backup first, then migrations, functions, site). See docs/deploy.md.
+# Deploy jobs only run once the repository variable DEPLOY_ENABLED is "true".
 
 on:
   push:
@@ -52,7 +53,7 @@ jobs:
   preview:
     name: Preview site (staging data)
     needs: test
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: vars.DEPLOY_ENABLED == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment: staging
     permissions:
@@ -91,7 +92,7 @@ jobs:
   deploy-staging:
     name: Deploy to staging
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: vars.DEPLOY_ENABLED == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging
     env:
