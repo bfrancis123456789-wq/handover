@@ -13,7 +13,7 @@ import { syncPushSubscription } from '../lib/push'
 import { supabase } from '../lib/supabase'
 import { recordDailyOpen } from '../lib/analytics'
 import {
-  BellIcon, ChatIcon, HashIcon, HelpIcon, HomeIcon, KeyIcon, LockIcon, LogoutIcon, MenuIcon, UserIcon, UsersIcon, XIcon,
+  BellIcon, ChatIcon, ClipboardIcon, HashIcon, HelpIcon, HomeIcon, KeyIcon, LockIcon, LogoutIcon, MenuIcon, UserIcon, UsersIcon, XIcon,
 } from './Icons'
 
 function useIsPlatformAdmin() {
@@ -87,6 +87,9 @@ function Sidebar({ onClose, onFeedback }) {
 
       <nav className="mt-4 flex-1 overflow-y-auto px-3 pb-4" aria-label="Main">
         <NavItem to="/" icon={HomeIcon} end onNavigate={onClose}>Home</NavItem>
+        {(profile.role === 'supervisor' || profile.role === 'manager') && (
+          <NavItem to="/reports" icon={ClipboardIcon} onNavigate={onClose}>Shift report</NavItem>
+        )}
 
         <SectionLabel>Channels</SectionLabel>
         <div className="space-y-0.5">

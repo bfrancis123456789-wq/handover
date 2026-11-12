@@ -26,13 +26,22 @@ Run this together on the **production** site, with two phones (one iPhone, one A
 - [ ] **iPhone:** in Safari, Share → Add to Home Screen, open Handover from the icon, sign in as Manager, turn on notifications, allow. Staff posts: the notification arrives on the lock screen and opens the right channel.
 - [ ] Switching a channel off in Notifications stops notifications from it. You never get notified about your own post.
 
-## Shift brief and issues ("shift report")
+## Shift brief and issues
 - [ ] Staff posts a problem ("Walk-in freezer door is broken") and a non-problem ("Morning all!").
 - [ ] Manager taps Refresh Summary: the freezer appears under Critical Issues with "open under an hour", and "Morning all" doesn't appear. Check the wording reads well (this is real Claude, not the test stand-in).
 - [ ] Manager assigns the freezer to Staff. Staff sees "Owner: …" live.
 - [ ] Staff posts "Fixed the freezer door". After the next refresh, it moves to Resolved Today.
 - [ ] Copy brief pastes a readable summary into a text message.
 - [ ] The founder dashboard shows the venue's briefs and a small AI cost.
+
+## Shift report
+- [ ] The Supervisor taps **Shift report** in the menu. Staff on Android see no such menu item.
+- [ ] **Draft with AI** fills the form from today's messages. Check the wording is sensible (real Claude). Hazards, resolutions and handover notes mention nothing from the Supervisors or Management channels.
+- [ ] Each section shows "Shared with the whole team" or "Supervisors and managers only". Incidents shows the note about reporting serious incidents.
+- [ ] Add a hazard by hand (e.g. "Broken step on the back stairs") and a handover note, then **Submit report**.
+- [ ] Staff taps Refresh Summary: the hazard appears as an issue marked "From a shift report", and the handover note appears under Next Priority. Nothing from the incidents or overview sections appears on the staff phone.
+- [ ] The Supervisor edits the report and taps **Save changes**: it shows "Edited". The Manager opens it from Recent reports and sees "Earlier versions (1)".
+- [ ] Choosing the **PM** shift label starts a separate report; **Day** still shows the submitted one.
 
 ## Accounts and email
 - [ ] **Password reset:** Staff signs out, taps Forgot password?, and the email arrives within a minute (check spam). Its link opens "Choose a new password" on the custom domain, and the new password works.
@@ -46,5 +55,3 @@ Run this together on the **production** site, with two phones (one iPhone, one A
 ## Monitoring
 - [ ] Sentry shows the release, with no unexpected errors from the dry run.
 - [ ] A test alert email from Sentry reaches the founder.
-
-**Note:** Handover doesn't have a separate "shift report" feature. The shift brief, with its tracked issues, is what venues use for handover. If "shift reports" means something else, raise it before the pilot.

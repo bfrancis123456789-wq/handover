@@ -137,6 +137,7 @@ function VenueCard({ v, onChanged }) {
         <Metric label="Messages (7 days)" value={v.messages_7d} sub={`${v.messages_total} in total`} />
         <Metric label="Briefs viewed (7 days)" value={v.brief_views_7d} sub={`${v.brief_refreshes_7d} refreshed`} />
         <Metric label="Open issues" value={v.issues_open} sub={`${v.issues_resolved_7d} resolved this week`} />
+        <Metric label="Shift reports (7 days)" value={v.reports_7d ?? 0} />
         <Metric label="Push opt-in" value={pct(v.push_opted_in, v.members)} sub={`${v.push_opted_in} of ${v.members} people`} />
         <Metric label="AI cost (7 days)" value={usd(venueCost)} sub={`${v.ai_calls_today} of ${v.daily_ai_cap} briefs today`} />
       </dl>
@@ -227,11 +228,12 @@ export default function AdminDashboard() {
         <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-teal-brand" /></div>
       ) : (
         <>
-          <dl className="card mt-6 grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 lg:grid-cols-6" data-testid="totals">
+          <dl className="card mt-6 grid grid-cols-2 gap-4 p-5 sm:grid-cols-3 lg:grid-cols-7" data-testid="totals">
             <Metric label="Venues" value={real.length} />
             <Metric label="Active this week" value={`${sum('active_7d')} / ${sum('members')}`} />
             <Metric label="Messages (7 days)" value={sum('messages_7d')} />
             <Metric label="Briefs viewed (7 days)" value={sum('brief_views_7d')} />
+            <Metric label="Shift reports (7 days)" value={sum('reports_7d')} />
             <Metric label="Push opt-in" value={pct(sum('push_opted_in'), sum('members'))} />
             <Metric label="AI cost (7 days)" value={usd(totalCost)} />
           </dl>

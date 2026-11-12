@@ -316,6 +316,96 @@ select pg_temp.expect('Export my data leaves out device keys',
 select set_config('role', 'anon', true);
 select pg_temp.expect_error('signed-out visitors cannot export data', $$select public.export_my_data()$$);
 
+-- ---- Shift reports ----
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000c3');
+create temp table rep as select public.start_shift_report('day') as id;
+grant select on rep to authenticated;
+select pg_temp.expect('starting the same shift twice returns the same report',
+  public.start_shift_report('day') = (select id from pg_temp.rep));
+select pg_temp.expect('a different shift label is a separate report',
+  public.start_shift_report('night') <> (select id from pg_temp.rep));
+select pg_temp.expect_error('unknown report sections are refused',
+  format('select public.update_shift_report(%L, %L)', (select id from pg_temp.rep), '{"secret_field": "x"}'));
+select public.update_shift_report((select id from pg_temp.rep),
+  '{"overview": "ov secret", "incidents": "inc secret", "hazards": "haz public", "resolutions": "res public", "handover_notes": "ho public"}', true);
+select pg_temp.expect('supervisors read submitted reports', exists (select 1 from shift_reports where id = (select id from pg_temp.rep) and status = 'submitted'));
+select pg_temp.expect('supervisors get every section in their brief',
+  (select incidents from public.brief_report_context() where report_id = (select id from pg_temp.rep)) = 'inc secret');
+select public.update_shift_report((select id from pg_temp.rep), '{"hazards": "haz public, edited"}', true);
+select pg_temp.expect('editing a submitted report keeps the earlier version and marks it edited',
+  (select edited_at is not null from shift_reports where id = (select id from pg_temp.rep)));
+select pg_temp.expect('supervisors cannot see earlier versions', not exists (select 1 from shift_report_versions));
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
+create temp table mgr_rep as select public.start_shift_report('day') as id;
+grant select on mgr_rep to authenticated;
+select pg_temp.expect('managers can see earlier versions',
+  (select count(*) from shift_report_versions where report_id = (select id from pg_temp.rep)) = 1
+  and (select hazards from shift_report_versions where report_id = (select id from pg_temp.rep)) = 'haz public');
+select pg_temp.expect_error('managers cannot edit someone else''s report',
+  format('select public.update_shift_report(%L, %L)', (select id from pg_temp.rep), '{"hazards": "changed"}'));
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000c3');
+select pg_temp.expect('supervisors cannot read someone else''s draft',
+  not exists (select 1 from shift_reports where id = (select id from pg_temp.mgr_rep)));
+select pg_temp.expect_error('people cannot write reports directly',
+  $$insert into shift_reports (workplace_id, author_id) values (my_workplace_id(), auth.uid())$$);
+select pg_temp.expect_error('people cannot change reports directly',
+  $$update shift_reports set hazards = 'x'$$);
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000b2');
+select pg_temp.expect('team members cannot read reports', not exists (select 1 from shift_reports));
+select pg_temp.expect('team members cannot read report versions', not exists (select 1 from shift_report_versions));
+select pg_temp.expect_error('team members cannot start a report', $$select public.start_shift_report('day')$$);
+select pg_temp.expect_error('team members cannot change a report',
+  format('select public.update_shift_report(%L, %L)', (select id from pg_temp.rep), '{"hazards": "x"}'));
+select pg_temp.expect('team members'' brief gets hazards, resolutions and handover notes',
+  (select hazards = 'haz public, edited' and resolutions = 'res public' and handover_notes = 'ho public'
+   from public.brief_report_context() where report_id = (select id from pg_temp.rep)));
+select pg_temp.expect('team members'' brief never gets incidents or overview',
+  (select incidents is null and overview is null from public.brief_report_context() where report_id = (select id from pg_temp.rep)));
+
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000d4');
+select pg_temp.expect('another workplace sees no reports',
+  not exists (select 1 from shift_reports) and not exists (select 1 from public.brief_report_context()));
+
+-- Issues from report sections follow the section's visibility.
+reset role;
+select public.apply_brief_updates('00000000-0000-0000-0000-0000000000b2', jsonb_build_array(
+  jsonb_build_object('title', 'Staff tries incident', 'severity', 'critical', 'source_message_ids', '[]'::jsonb,
+    'source_report_refs', jsonb_build_array((select id from pg_temp.rep)::text || ':incidents'), 'already_resolved', false),
+  jsonb_build_object('title', 'Staff hazard', 'severity', 'critical', 'source_message_ids', '[]'::jsonb,
+    'source_report_refs', jsonb_build_array((select id from pg_temp.rep)::text || ':hazards'), 'already_resolved', false)), '[]'::jsonb, '{}');
+select pg_temp.expect('a team member''s brief cannot create issues from report incidents',
+  not exists (select 1 from issues where title = 'Staff tries incident'));
+select pg_temp.expect('issues from shared report sections are visible to everyone',
+  (select channel from issues where title = 'Staff hazard') = 'general');
+select public.apply_brief_updates('00000000-0000-0000-0000-0000000000b2', jsonb_build_array(
+  jsonb_build_object('title', 'Second hazard in the same section', 'severity', 'normal', 'source_message_ids', '[]'::jsonb,
+    'source_report_refs', jsonb_build_array((select id from pg_temp.rep)::text || ':hazards'), 'already_resolved', false),
+  jsonb_build_object('title', 'Staff hazard', 'severity', 'critical', 'source_message_ids', '[]'::jsonb,
+    'source_report_refs', jsonb_build_array((select id from pg_temp.rep)::text || ':hazards'), 'already_resolved', false)), '[]'::jsonb, '{}');
+select pg_temp.expect('several hazards in one report section each become an issue',
+  exists (select 1 from issues where title = 'Second hazard in the same section'));
+select pg_temp.expect('the same hazard from the same report is not recorded twice',
+  (select count(*) from issues where title = 'Staff hazard') = 1);
+select public.apply_brief_updates('00000000-0000-0000-0000-0000000000a1', jsonb_build_array(
+  jsonb_build_object('title', 'Manager incident', 'severity', 'normal', 'source_message_ids', '[]'::jsonb,
+    'source_report_refs', jsonb_build_array((select id from pg_temp.rep)::text || ':incidents'), 'already_resolved', false)), '[]'::jsonb, '{}');
+select pg_temp.expect('issues from report incidents are for supervisors and managers only',
+  (select channel from issues where title = 'Manager incident') = 'supervisors');
+select public.apply_brief_updates('00000000-0000-0000-0000-0000000000a1', jsonb_build_array(
+  jsonb_build_object('title', 'Fake report source', 'severity', 'normal', 'source_message_ids', '[]'::jsonb,
+    'source_report_refs', jsonb_build_array(gen_random_uuid()::text || ':hazards', 'not-a-ref'), 'already_resolved', false)), '[]'::jsonb, '{}');
+select pg_temp.expect('made-up report sources are ignored', not exists (select 1 from issues where title = 'Fake report source'));
+
+-- 24 hours after submitting, the report locks.
+update shift_reports set submitted_at = now() - interval '25 hours' where id = (select id from pg_temp.rep);
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000c3');
+select pg_temp.expect_error('reports lock 24 hours after submitting',
+  format('select public.update_shift_report(%L, %L)', (select id from pg_temp.rep), '{"hazards": "too late"}'));
+reset role;
+
 -- ---- Pilot: analytics, AI usage, feedback, admin, checklist, demo ----
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000b2');
 select public.record_activity('open');

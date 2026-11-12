@@ -61,7 +61,7 @@ export function Privacy() {
         <H>What we collect</H>
         <UL>
           <li><strong>Account details:</strong> your name, email address, password (stored only as a secure hash), profile photo and role.</li>
-          <li><strong>What you post:</strong> messages, photos, likes, and the issues and shift briefs created from them.</li>
+          <li><strong>What you post:</strong> messages, photos, likes, shift reports written by supervisors and managers, and the issues and shift briefs created from them.</li>
           <li><strong>Settings and devices:</strong> notification choices, and a technical address for each device you turn notifications on for.</li>
           <li><strong>Technical information:</strong> error reports (which page, what went wrong, your account ID, browser type) and basic security logs.</li>
         </UL>
@@ -102,7 +102,11 @@ export function Privacy() {
 
       <section className="space-y-2">
         <H>Who we share it with</H>
-        <p>Your messages are visible to people in your workplace who can access the channel you post in. We also use these service providers, who handle information for us under contract:</p>
+        <p>
+          Your messages are visible to people in your workplace who can access the channel you post in. Shift reports are visible to supervisors
+          and managers; their hazards, resolutions and handover notes also appear in everyone's shift brief, while overviews and incidents never
+          go beyond supervisors and managers. We also use these service providers, who handle information for us under contract:
+        </p>
         <UL>
           <li><strong>Supabase</strong>: hosting, database, file storage and sign-in. Data is stored in <V k="hostingRegion" />.</li>
           <li><strong>Anthropic</strong> (United States): AI processing for shift briefs. Message text from your channels is sent when someone refreshes a brief.</li>

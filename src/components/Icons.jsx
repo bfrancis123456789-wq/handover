@@ -27,3 +27,4 @@ export const TrashIcon = make(<><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-1
 export const ArrowDownIcon = make(<><path d="M12 5v14M6 13l6 6 6-6" /></>)
 export const MailIcon = make(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>)
 export const CheckIcon = make(<><path d="m5 12.5 4.5 4.5L19 7.5" /></>)
+export const ClipboardIcon = make(<><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3" /></>)

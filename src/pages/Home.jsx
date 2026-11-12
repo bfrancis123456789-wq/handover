@@ -13,7 +13,7 @@ import { CopyIcon, HashIcon, LockIcon, RefreshIcon } from '../components/Icons'
 
 const DAY = 24 * 60 * 60 * 1000
 const ISSUE_SELECT =
-  'id, channel, title, severity, status, created_at, resolved_at, owner_id, owner:profiles!issues_owner_id_fkey(display_name), resolver:profiles!issues_resolved_by_fkey(display_name)'
+  'id, channel, title, severity, status, created_at, resolved_at, owner_id, source_report_refs, owner:profiles!issues_owner_id_fkey(display_name), resolver:profiles!issues_resolved_by_fkey(display_name)'
 
 const STYLES = {
   red: { dot: 'bg-red-500', tint: 'bg-red-50', text: 'text-red-700' },
@@ -72,7 +72,7 @@ function IssueItem({ issue, color, canManage, members, onAction }) {
             {issueAge(issue.created_at)}
           </span>
         )}
-        {channel && <span>#{channel.name}</span>}
+        {issue.source_report_refs?.length > 0 ? <span data-testid="from-report">From a shift report</span> : channel && <span>#{channel.name}</span>}
         {!resolved && <span data-testid="issue-owner">{issue.owner ? `Owner: ${issue.owner.display_name}` : 'No owner'}</span>}
       </p>
       {canManage && (

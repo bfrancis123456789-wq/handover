@@ -16,6 +16,8 @@ const Notifications = lazy(() => import('./pages/settings/Notifications'))
 const Account = lazy(() => import('./pages/settings/Account'))
 const Help = lazy(() => import('./pages/settings/Help'))
 const ManageTeam = lazy(() => import('./pages/settings/ManageTeam'))
+const ShiftReport = lazy(() => import('./pages/ShiftReport'))
+const ShiftReportView = lazy(() => import('./pages/ShiftReport').then((m) => ({ default: m.ShiftReportView })))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })))
 const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })))
@@ -89,6 +91,8 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Home />} />
         <Route path="channels/:channelId" element={<Chat />} />
+        <Route path="reports" element={<ShiftReport />} />
+        <Route path="reports/:reportId" element={<ShiftReportView />} />
         <Route path="settings/profile" element={<Profile />} />
         <Route path="settings/notifications" element={<Notifications />} />
         <Route path="settings/account" element={<Account />} />

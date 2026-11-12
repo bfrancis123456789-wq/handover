@@ -792,7 +792,146 @@ async function makePng(browser, file, color, label) {
     check('signing out stops notifications to that device', subsOf('mia') === 0)
   })
 
-  // 25. Pilot: analytics, feedback, manager checklist, AI cap, founder dashboard, demo
+  // 25. Shift reports
+  await step('shift reports', async () => {
+    const idOf = (who) => sql(`select id from auth.users where email = '${email(who)}';`)
+    const openMenuItem = async (u, name) => {
+      if (await u.page.isVisible('button[aria-label="Open menu"]')) {
+        await u.page.click('button[aria-label="Open menu"]')
+        await u.page.click(`.fixed nav >> text="${name}"`)
+      } else {
+        await u.page.click(`nav >> text="${name}"`)
+      }
+    }
+    const lastCalls = async (n) => (await aiCalls()).slice(-n)
+    async function refreshBrief(u, who) {
+      sql(`update summaries set created_at = now() - interval '5 minutes' where user_id = '${idOf(who)}';`)
+      await u.page.goto(BASE)
+      await u.page.waitForSelector('text=Your Shift Brief')
+      await u.page.click('button:has-text("Refresh Summary")')
+      await u.page.waitForFunction(() => !document.body.innerText.includes('Summarising'), null, { timeout: 15000 })
+      await u.page.waitForTimeout(400)
+    }
+
+    // Team members never see reports.
+    await staff.page.goto(BASE)
+    await staff.page.waitForSelector('text=Your Shift Brief')
+    check('team members have no Shift report menu item', !(await staff.page.textContent('nav')).includes('Shift report'))
+    await staff.page.goto(`${BASE}/reports`)
+    await staff.page.waitForSelector('text=Your Shift Brief')
+    check('typing the reports address sends team members home', !staff.page.url().includes('/reports'))
+
+    // Today's messages, including one in the Supervisors channel.
+    await mgr.page.goto(`${BASE}/login`)
+    if (await mgr.page.isVisible('#login-email')) {
+      await mgr.page.fill('#login-email', email('mia'))
+      await mgr.page.fill('#login-password', 'password123')
+      await mgr.page.click('button:has-text("Sign in")')
+      await mgr.page.waitForSelector('text=Your Shift Brief')
+    }
+    for (const [channel, text] of [['General', 'Wet floor by the staff entrance, sign is out'], ['Supervisors', 'Cash drawer 2 was 15 dollars short tonight']]) {
+      await mgr.page.goto(`${BASE}/channels/${channel === 'General' ? 'general' : 'supervisors'}`)
+      await mgr.page.waitForSelector(`main h1:text-is("${channel}")`)
+      await mgr.page.fill('#chat-text', text)
+      await mgr.page.click('button:has-text("Post")')
+      await mgr.page.waitForSelector(`article:has-text("${text.slice(0, 18)}")`)
+    }
+
+    // A supervisor writes today's report, starting from an AI draft.
+    await lead.page.goto(BASE)
+    await lead.page.waitForSelector('text=Your Shift Brief')
+    await openMenuItem(lead, 'Shift report')
+    await lead.page.waitForSelector('h1:text-is("Shift report")')
+    await lead.page.waitForSelector('text=Draft, not submitted yet', { timeout: 10000 }).catch(() => {})
+    check('supervisors open today\'s report as a draft', await lead.page.isVisible('text=Draft, not submitted yet'))
+    check('the incidents section carries the reporting note',
+      (await lead.page.textContent('[data-testid="incidents-note"]')).includes('Serious incidents may also need reporting to your manager and the relevant authority. This report doesn\'t replace that.'))
+    check('each section says who can see it',
+      (await lead.page.textContent('[data-field="hazards"]')).includes('Shared with the whole team') &&
+      (await lead.page.textContent('[data-field="incidents"]')).includes('Supervisors and managers only'))
+    await lead.page.click('button:has-text("Draft with AI")')
+    await lead.page.waitForSelector('text=Check every section and make changes before you submit', { timeout: 20000 })
+    check('Draft with AI fills the report from today\'s messages',
+      (await lead.page.inputValue('#report-hazards')).includes('Wet floor') && (await lead.page.inputValue('#report-incidents')).includes('Cash drawer'))
+    const draftCalls = await lastCalls(2)
+    const sharedCall = draftCalls.find((c) => 'hazards' in (c.body.output_config?.format?.schema?.properties ?? {}))
+    const privateCall = draftCalls.find((c) => 'incidents' in (c.body.output_config?.format?.schema?.properties ?? {}))
+    check('shared sections are drafted only from channels everyone can see',
+      !!sharedCall && sharedCall.body.messages[0].content.includes('Wet floor') && !sharedCall.body.messages[0].content.includes('Cash drawer'))
+    check('supervisor-only sections can use the Supervisors channel', !!privateCall && privateCall.body.messages[0].content.includes('Cash drawer'))
+    await lead.page.fill('#report-hazards', (await lead.page.inputValue('#report-hazards')) + '\n- Broken step on the back stairs')
+    await lead.page.fill('#report-handover_notes', 'Milk delivery arriving at 6am tomorrow, check the count')
+    await lead.page.waitForSelector('[data-testid="save-state"]:has-text("Draft saved")', { timeout: 8000 })
+    check('drafts save automatically', true)
+    await lead.page.click('button:has-text("Submit report")')
+    await lead.page.waitForSelector('text=Report submitted')
+    check('submitting confirms what will be shared', await lead.page.isVisible('text=will be included in everyone\'s shift brief'))
+    const reportId = sql(`select id from shift_reports where author_id = '${idOf('lee')}' and status = 'submitted' order by submitted_at desc limit 1;`)
+    check('the report is saved as submitted', /^[0-9a-f-]{36}$/.test(reportId))
+
+    // One report per shift: a Night report is separate; Day stays submitted.
+    await lead.page.click('role=radio[name="Night"]')
+    await lead.page.waitForSelector('text=Draft, not submitted yet')
+    await lead.page.click('role=radio[name="Day"]')
+    await lead.page.waitForSelector('text=Submitted')
+    check('each shift label has its own report', sql(`select count(distinct shift) from shift_reports where author_id = '${idOf('lee')}';`) === '2')
+
+    // The brief: team members get shared sections only.
+    await refreshBrief(staff, 'sid')
+    let calls = await lastCalls(1)
+    const staffPrompt = calls[0].body.messages[0].content
+    check('team members\' briefs include report hazards and handover notes',
+      /<shift_reports>[\s\S]*Broken step[\s\S]*<\/shift_reports>/.test(staffPrompt) && staffPrompt.includes('Milk delivery arriving'))
+    check('team members\' briefs never include report incidents or overview',
+      !/<shift_reports>[\s\S]*(Incidents|Overview):[\s\S]*<\/shift_reports>/.test(staffPrompt))
+    await staff.page.waitForSelector('[data-testid="critical"] li:has-text("Broken step")')
+    check('a report hazard shows on Home, marked as from a shift report',
+      (await staff.page.textContent('[data-testid="critical"] li:has-text("Broken step")')).includes('From a shift report'))
+    check('report handover notes become Next Priority', (await staff.page.textContent('[data-testid="priority"]')).includes('Milk delivery'))
+
+    await refreshBrief(mgr, 'mia')
+    check('report incidents become issues only supervisors and managers can see',
+      sql(`select channel from issues where source_report_refs::text like '%:incidents%' order by created_at desc limit 1;`) === 'supervisors')
+    await staff.page.reload()
+    await staff.page.waitForSelector('[data-testid="critical"]')
+    check('team members don\'t see issues from report incidents', !(await staff.page.textContent('main')).includes('Cash drawer'))
+
+    // Edit within 24 hours: "edited" label, earlier version kept for managers.
+    await lead.page.goto(`${BASE}/reports/${reportId}`)
+    await lead.page.waitForSelector('#report-resolutions')
+    await lead.page.fill('#report-resolutions', 'Broken step on the back stairs fixed by maintenance')
+    await lead.page.click('button:has-text("Save changes")')
+    await lead.page.waitForSelector('text=The earlier version has been kept')
+    await lead.page.waitForSelector('[data-testid="edited-label"]')
+    check('edits within 24 hours show an "edited" label', true)
+    check('supervisors don\'t see earlier versions', (await lead.page.locator('[data-testid="versions"]').count()) === 0)
+    await mgr.page.goto(`${BASE}/reports`)
+    await mgr.page.waitForSelector('[data-testid="recent-report"]')
+    check('managers see all submitted reports', (await mgr.page.textContent('main')).includes('Lee Lead'))
+    await mgr.page.goto(`${BASE}/reports/${reportId}`)
+    await mgr.page.waitForSelector('[data-testid="versions"]')
+    check('managers can view earlier versions', (await mgr.page.textContent('[data-testid="versions"]')).includes('Version 1'))
+    check('managers read someone else\'s report without editing it', (await mgr.page.locator('#report-hazards').count()) === 0)
+
+    // A report resolution closes the matching issue.
+    await refreshBrief(staff, 'sid')
+    await staff.page.waitForSelector('[data-testid="resolved"] li:has-text("Broken step")', { timeout: 10000 })
+    check('report resolutions move issues to Resolved Today', true)
+
+    // Team members can't open a report directly.
+    await staff.page.goto(`${BASE}/reports/${reportId}`)
+    await staff.page.waitForSelector('text=Your Shift Brief')
+    check('team members can\'t open a report by its address', !staff.page.url().includes('/reports'))
+
+    // After 24 hours the report is locked.
+    sql(`update shift_reports set submitted_at = now() - interval '25 hours' where id = '${reportId}';`)
+    await lead.page.goto(`${BASE}/reports/${reportId}`)
+    await lead.page.waitForSelector('text=Nothing reported.', { state: 'attached' }).catch(() => {})
+    await lead.page.waitForSelector('[data-field="hazards"]')
+    check('reports lock 24 hours after submitting', (await lead.page.locator('#report-hazards').count()) === 0 && (await lead.page.textContent('main')).includes('Locked'))
+  })
+
+  // 26. Pilot: analytics, feedback, manager checklist, AI cap, founder dashboard, demo
   await step('pilot tools', async () => {
     const idOf = (who) => sql(`select id from auth.users where email = '${email(who)}';`)
     const harbour = sql(`select workplace_id from profiles where id = '${idOf('mia')}';`)
@@ -878,7 +1017,7 @@ async function makePng(browser, file, color, label) {
     const card = mgr.page.locator('[data-testid="venue"][data-venue="Harbour Hotel"]')
     await card.waitFor()
     const cardText = await card.textContent()
-    check('the dashboard shows per-venue counts', /Active this week/.test(cardText) && /Push opt-in/.test(cardText) && /AI cost/.test(cardText))
+    check('the dashboard shows per-venue counts', /Active this week/.test(cardText) && /Push opt-in/.test(cardText) && /AI cost/.test(cardText) && /Shift reports/.test(cardText))
     const pageText = await mgr.page.textContent('main')
     check('the dashboard shows no message content', !pageText.includes('Fridge 3') && !pageText.includes('Bar 2 tap'))
     check('feedback appears on the dashboard', pageText.includes(`hard to find ${run}`) && pageText.includes('Chat: General'))
@@ -893,6 +1032,8 @@ async function makePng(browser, file, color, label) {
     await mgr.page.waitForSelector('text=Demo reset', { timeout: 30000 })
     check('the demo resets with fresh sample data',
       sql(`select count(*) from messages m join workplaces w on w.id = m.workplace_id where w.is_demo;`) === '16')
+    check('the demo includes a submitted shift report',
+      sql(`select count(*) from shift_reports r join workplaces w on w.id = r.workplace_id where w.is_demo and r.status = 'submitted';`) === '1')
     const prospect = await newUser(browser, 'prospect', { width: 390, height: 844 })
     await prospect.page.goto(`${BASE}/login`)
     await prospect.page.fill('#login-email', 'demo.staff1@demo.handover.test')
@@ -905,7 +1046,7 @@ async function makePng(browser, file, color, label) {
     check('demo accounts can\'t change email, password, leave or delete', (await prospect.page.locator('button:has-text("Delete my account")').count()) === 0)
   })
 
-  // 26. Privacy Policy, Terms, CORS and error monitoring
+  // 27. Privacy Policy, Terms, CORS and error monitoring
   await step('launch readiness', async () => {
     const visitor = await newUser(browser, 'visitor')
     await visitor.page.goto(`${BASE}/login`)
@@ -967,7 +1108,7 @@ async function makePng(browser, file, color, label) {
       tx.map((t) => t.event.contexts?.trace?.status).join(','))
   })
 
-  // 27. Export my data and delete my account
+  // 28. Export my data and delete my account
   await step('export and delete', async () => {
     async function openSettings(u, name) {
       if (await u.page.isVisible('button[aria-label="Open menu"]')) {

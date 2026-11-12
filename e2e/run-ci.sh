@@ -50,6 +50,7 @@ start_fn shift-brief 8000
 start_fn send-push 8001
 start_fn delete-account 8002
 start_fn reset-demo 8003
+start_fn report-draft 8004
 
 npx vite --mode e2e --config e2e/vite.e2e.config.js > "$LOGS/vite.log" 2>&1 & pids+=($!)
 
@@ -58,7 +59,7 @@ wait_for() {
   echo "Timed out waiting for $1"; return 1
 }
 for url in http://localhost:5173 http://127.0.0.1:4010/__calls http://127.0.0.1:4020/__pushes http://127.0.0.1:4030/__events \
-           http://127.0.0.1:8000 http://127.0.0.1:8001 http://127.0.0.1:8002 http://127.0.0.1:8003; do
+           http://127.0.0.1:8000 http://127.0.0.1:8001 http://127.0.0.1:8002 http://127.0.0.1:8003 http://127.0.0.1:8004; do
   wait_for "$url"
 done
 

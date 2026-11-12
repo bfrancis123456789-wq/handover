@@ -67,6 +67,8 @@ serve("reset-demo", async (req) => {
     await report(seedError, "reset-demo", { step: "seed" });
     return json({ error: "The demo data could not be created. Try again in a moment." }, 500);
   }
+  const { error: reportError } = await admin.rpc("seed_demo_reports", { p_supervisor: users.supervisor });
+  if (reportError) await report(reportError, "reset-demo", { step: "seed_reports" });
 
   return json({ reset: true, messages: seeded?.messages ?? 0, accounts: DEMO_ACCOUNTS.map((a) => a.email), password });
 });

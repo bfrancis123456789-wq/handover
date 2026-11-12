@@ -24,6 +24,12 @@ Keep every shift on the same page. Handover is a workplace chat app for shift-ba
 - Reuses the saved brief when nothing new has been posted, and allows one fresh brief per person per minute, so it stays fast and cheap
 - Copy the brief as text to paste into an email or message
 
+**Shift reports**
+- Supervisors and managers complete a report each shift (overview, incidents, hazards, resolutions, handover notes), starting from an AI draft of the day's messages, then edit and submit. One per shift per day; "Day" by default, with optional AM, PM and Night labels
+- Hazards, resolutions and handover notes feed everyone's shift brief (Critical Issues, Ongoing Items, Resolved Today, Next Priority); overview and incidents stay with supervisors and managers
+- Editable for 24 hours with an "edited" label and every earlier version kept for managers, then locked
+- The AI drafts shared sections only from channels everyone can see
+
 **Team and account**
 - Create a workplace (you become the manager) or join with a 6-character code
 - Managers change roles, remove people who have left, and reset the join code
@@ -122,6 +128,8 @@ All rules live in the database, so the interface cannot bypass them.
 | Message photos are private | `message-images` bucket, path `<workplace>/<channel>/<file>`, served through signed URLs |
 | Issues are visible only to people who can access their channel; an issue takes the most restricted channel among its source messages | `issues` policy, `apply_brief_updates()` |
 | Only the shift-brief function records AI issue updates; only supervisors and managers resolve, reopen or assign, and owners must be able to see the channel | `apply_brief_updates()` (service role only), `resolve_issue()`, `reopen_issue()`, `assign_issue()` |
+| Shift reports: supervisors and managers read submitted reports, authors their own drafts, team members never; overview and incidents never reach team members' briefs | `shift_reports` policy, `brief_report_context()`, `apply_brief_updates()` |
+| Reports can be changed for 24 hours by their author, with earlier versions kept for managers | `update_shift_report()`, `shift_report_versions` policy |
 | Each person's brief only uses channels they can read | the Edge Function queries with the caller's token, so RLS applies, and gets the channel list from `my_channels()` |
 | People see and remove only their own push devices; devices are saved through a checked function | `push_subscriptions` policies and `save_push_subscription()` |
 | Push goes only to people in the workplace who can access the channel, have it switched on, and didn't write the message | `push_recipients()`, callable only by the `send-push` function (service role) |
@@ -130,8 +138,8 @@ All rules live in the database, so the interface cannot bypass them.
 
 Two test suites run against a local Supabase stack (needs Docker, the Supabase CLI and Deno). GitHub Actions runs both on every push (`.github/workflows/ci.yml`), and uploads screenshots and logs if anything fails.
 
-- `e2e/walkthrough.cjs`: 150 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, push notifications (decrypted to check who received what), tracked issues carrying over beyond 24 hours, error reporting, CORS, exporting data, deleting accounts, feedback, the manager checklist, daily AI limits, the founder dashboard with two-factor sign-in, the demo, phone layout and more.
-- `e2e/security.sql`: 102 checks that act as different users directly against the database, proving the rules hold even without the app.
+- `e2e/walkthrough.cjs`: 178 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, push notifications (decrypted to check who received what), tracked issues carrying over beyond 24 hours, error reporting, CORS, exporting data, deleting accounts, feedback, the manager checklist, daily AI limits, the founder dashboard with two-factor sign-in, the demo, shift reports, phone layout and more.
+- `e2e/security.sql`: 128 checks that act as different users directly against the database, proving the rules hold even without the app.
 
 To run them on your machine:
 
@@ -150,7 +158,7 @@ src/
   context/AuthContext.jsx   session, profile, workplace (with live role updates)
   context/UnreadContext.jsx unread counts per channel
   components/               Layout (sidebar + phone menu), WelcomeDialog, ImageViewer, RoleBadge, Avatar…
-  pages/                    Login, Signup, ForgotPassword, ResetPassword, WorkplaceSetup, Home, Chat
+  pages/                    Login, Signup, ForgotPassword, ResetPassword, WorkplaceSetup, Home, Chat, ShiftReport, AdminDashboard
   pages/settings/           Profile, Notifications, Account, Help, ManageTeam
 supabase/
   migrations/               schema, security rules, functions, storage, realtime
@@ -158,6 +166,7 @@ supabase/
   functions/send-push/      Edge Function that sends push notifications
   functions/delete-account/ Edge Function that deletes an account
   functions/reset-demo/     Edge Function that resets the demo workspace
+  functions/report-draft/   Edge Function that drafts a shift report
   functions/_shared/        CORS and Sentry helpers
 e2e/                        end-to-end and security tests, stand-in services, CI script
 scripts/                    demo reset, production backup, smoke check
