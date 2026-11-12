@@ -7,11 +7,22 @@ import Avatar from './Avatar'
 import Logo from './Logo'
 import RoleBadge from './RoleBadge'
 import WelcomeDialog from './WelcomeDialog'
+import FeedbackDialog from './FeedbackDialog'
 import Spinner from './Spinner'
 import { syncPushSubscription } from '../lib/push'
+import { supabase } from '../lib/supabase'
+import { recordDailyOpen } from '../lib/analytics'
 import {
-  BellIcon, HashIcon, HelpIcon, HomeIcon, KeyIcon, LockIcon, LogoutIcon, MenuIcon, UserIcon, UsersIcon, XIcon,
+  BellIcon, ChatIcon, HashIcon, HelpIcon, HomeIcon, KeyIcon, LockIcon, LogoutIcon, MenuIcon, UserIcon, UsersIcon, XIcon,
 } from './Icons'
+
+function useIsPlatformAdmin() {
+  const [admin, setAdmin] = useState(false)
+  useEffect(() => {
+    supabase.rpc('my_admin_status').then(({ data }) => setAdmin(Boolean(data?.admin)), () => {})
+  }, [])
+  return admin
+}
 
 const SETTINGS = [
   { to: '/settings/profile', label: 'My Profile', icon: UserIcon },
@@ -54,12 +65,13 @@ function SectionLabel({ children }) {
   return <p className="mb-1.5 mt-6 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{children}</p>
 }
 
-function Sidebar({ onClose }) {
+function Sidebar({ onClose, onFeedback }) {
   const { profile, workplace, signOut } = useAuth()
   const { counts } = useUnread()
   const channels = channelsFor(profile.role)
   const muted = (id) => profile.notification_settings?.[id] === false
   const settings = SETTINGS.filter((s) => !s.managerOnly || profile.role === 'manager')
+  const isAdmin = useIsPlatformAdmin()
 
   return (
     <div className="flex h-full flex-col bg-navy-900 text-white">
@@ -91,6 +103,15 @@ function Sidebar({ onClose }) {
           {settings.map((s) => (
             <NavItem key={s.to} to={s.to} icon={s.icon} onNavigate={onClose}>{s.label}</NavItem>
           ))}
+          <button
+            type="button"
+            onClick={() => { onClose?.(); onFeedback() }}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-300 transition hover:bg-navy-800 hover:text-white"
+          >
+            <ChatIcon className="h-[18px] w-[18px] shrink-0" />
+            <span className="truncate">Send feedback</span>
+          </button>
+          {isAdmin && <NavItem to="/admin" icon={LockIcon} onNavigate={onClose}>Founder dashboard</NavItem>}
         </div>
       </nav>
 
@@ -110,19 +131,21 @@ function Sidebar({ onClose }) {
 
 function LayoutInner() {
   const [open, setOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const location = useLocation()
-  const { profile } = useAuth()
+  const { profile, workplace } = useAuth()
   const { counts } = useUnread()
   const anyUnread = Object.entries(counts).some(([ch, n]) => n > 0 && profile.notification_settings?.[ch] !== false)
 
   useEffect(() => setOpen(false), [location.pathname])
   useEffect(() => { syncPushSubscription() }, [profile.id])
+  useEffect(() => { recordDailyOpen() }, [profile.workplace_id])
 
   return (
     <div className="flex h-full">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 lg:block">
-        <Sidebar />
+        <Sidebar onFeedback={() => setFeedbackOpen(true)} />
       </aside>
 
       {/* Mobile drawer */}
@@ -130,12 +153,17 @@ function LayoutInner() {
         <div className="fixed inset-0 z-40 lg:hidden">
           <button className="absolute inset-0 bg-navy-950/60" onClick={() => setOpen(false)} aria-label="Close menu" />
           <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] shadow-xl">
-            <Sidebar onClose={() => setOpen(false)} />
+            <Sidebar onClose={() => setOpen(false)} onFeedback={() => setFeedbackOpen(true)} />
           </aside>
         </div>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {workplace?.is_demo && (
+          <p className="bg-teal-brand px-4 py-1.5 text-center text-xs font-semibold text-white" role="note" data-testid="demo-banner">
+            Demo workspace with sample data. Changes are undone when it's reset.
+          </p>
+        )}
         <header className="flex items-center gap-3 bg-navy-900 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white lg:hidden">
           <button onClick={() => setOpen(true)} className="relative -ml-2 rounded-lg p-2 hover:bg-navy-800" aria-label="Open menu">
             <MenuIcon />
@@ -151,6 +179,7 @@ function LayoutInner() {
       </div>
 
       {!profile.has_onboarded && <WelcomeDialog />}
+      {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
     </div>
   )
 }

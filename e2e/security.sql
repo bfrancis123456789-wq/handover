@@ -17,6 +17,13 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', uid, 'role', 'authenticated')::text, true);
 end $$;
 
+-- Same, but signed in with two-factor (aal2), as the founder dashboard requires.
+create function pg_temp.act_as_mfa(uid uuid) returns void language plpgsql as $$
+begin
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', json_build_object('sub', uid, 'role', 'authenticated', 'aal', 'aal2')::text, true);
+end $$;
+
 create function pg_temp.expect_error(name text, stmt text) returns void language plpgsql as $$
 begin
   begin
@@ -308,6 +315,95 @@ select pg_temp.expect('Export my data leaves out device keys',
   (select d::text from my_export) not like '%p256dh%');
 select set_config('role', 'anon', true);
 select pg_temp.expect_error('signed-out visitors cannot export data', $$select public.export_my_data()$$);
+
+-- ---- Pilot: analytics, AI usage, feedback, admin, checklist, demo ----
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000b2');
+select public.record_activity('open');
+select public.record_activity('brief_view');
+select public.record_activity('something_else');
+select public.submit_feedback('Home', 'The brief is great', '0.1.0', 'test');
+select pg_temp.expect_error('people cannot read usage analytics', $$select * from activity_days$$);
+select pg_temp.expect_error('people cannot read AI usage', $$select * from ai_usage$$);
+select pg_temp.expect_error('people cannot read feedback, even their own', $$select * from feedback$$);
+select pg_temp.expect_error('people cannot see who the admins are', $$select * from platform_admins$$);
+select pg_temp.expect_error('people cannot make themselves admins', $$insert into platform_admins values (auth.uid())$$);
+select pg_temp.expect_error('people cannot spend the AI budget directly', format('select public.claim_ai_call(%L)', public.my_workplace_id()));
+select pg_temp.expect_error('people cannot log AI tokens', format('select public.record_ai_tokens(%L, 1, 1)', public.my_workplace_id()));
+select pg_temp.expect_error('people cannot see the dashboard numbers', $$select * from public.admin_workplace_stats()$$);
+select pg_temp.expect_error('people cannot change AI limits', format('select public.admin_set_ai_cap(%L, 9999)', public.my_workplace_id()));
+select pg_temp.expect_error('people cannot change workplace settings directly', $$update workplaces set daily_ai_cap = 9999, is_demo = true$$);
+select pg_temp.expect_error('people cannot seed the demo', $$select public.seed_demo_workspace('{}'::jsonb)$$);
+select pg_temp.expect_error('people cannot list demo accounts', $$select * from public.demo_account_ids()$$);
+update profiles set checklist_dismissed_at = now() where id = '00000000-0000-0000-0000-0000000000a1';
+reset role;
+select pg_temp.expect('activity is counted for your own workplace, ignoring unknown kinds',
+  (select opens = 1 and brief_views = 1 from activity_days where user_id = '00000000-0000-0000-0000-0000000000b2'));
+select pg_temp.expect('feedback is saved with the workplace',
+  exists (select 1 from feedback f join profiles p on p.id = f.user_id where f.message = 'The brief is great' and f.workplace_id = p.workplace_id));
+select pg_temp.expect('people cannot hide someone else''s checklist',
+  (select checklist_dismissed_at is null from profiles where id = '00000000-0000-0000-0000-0000000000a1'));
+
+-- The daily AI cap
+update workplaces set daily_ai_cap = 1 where id = (select workplace_id from profiles where id = '00000000-0000-0000-0000-0000000000b2');
+create temp table claims as
+  select public.claim_ai_call(workplace_id) as first, public.claim_ai_call(workplace_id) as second
+  from profiles where id = '00000000-0000-0000-0000-0000000000b2';
+select pg_temp.expect('the daily cap allows calls up to the limit, then stops',
+  (select (first ->> 'allowed')::boolean and not (second ->> 'allowed')::boolean from claims));
+
+-- Admins need two-factor sign-in
+insert into platform_admins (user_id) values ('00000000-0000-0000-0000-0000000000a1');
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
+select pg_temp.expect('admins can see they are admins before two-factor',
+  (public.my_admin_status() ->> 'admin')::boolean and not (public.my_admin_status() ->> 'mfa')::boolean);
+select pg_temp.expect_error('admins without two-factor cannot see the dashboard numbers', $$select * from public.admin_workplace_stats()$$);
+select pg_temp.act_as_mfa('00000000-0000-0000-0000-0000000000a1');
+select pg_temp.expect('admins with two-factor see per-venue counts',
+  (select count(*) from public.admin_workplace_stats()) >= 2);
+select pg_temp.expect('admins with two-factor see feedback',
+  exists (select 1 from public.admin_recent_feedback(10) where message = 'The brief is great'));
+select public.admin_set_ai_cap((select workplace_id from profiles where id = '00000000-0000-0000-0000-0000000000a1'), 25);
+reset role;
+select pg_temp.expect('admins with two-factor can change a venue''s daily limit',
+  (select daily_ai_cap from workplaces w join profiles p on p.workplace_id = w.id where p.id = '00000000-0000-0000-0000-0000000000a1') = 25);
+select pg_temp.act_as_mfa('00000000-0000-0000-0000-0000000000b2');
+select pg_temp.expect_error('two-factor alone does not make someone an admin', $$select * from public.admin_workplace_stats()$$);
+
+-- Manager checklist
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');
+select pg_temp.expect('the manager checklist reports progress from real activity',
+  (public.manager_checklist() ->> 'staff_invited')::boolean and not (public.manager_checklist() ->> 'dismissed')::boolean);
+
+-- Demo workspace
+reset role;
+insert into auth.users (id, email, raw_user_meta_data, aud, role) values
+  ('00000000-0000-0000-0000-00000000d001', 'sec-demo1@demo.handover.test', '{"full_name":"D1"}', 'authenticated', 'authenticated'),
+  ('00000000-0000-0000-0000-00000000d002', 'sec-demo2@demo.handover.test', '{"full_name":"D2"}', 'authenticated', 'authenticated'),
+  ('00000000-0000-0000-0000-00000000d003', 'sec-demo3@demo.handover.test', '{"full_name":"D3"}', 'authenticated', 'authenticated'),
+  ('00000000-0000-0000-0000-00000000d004', 'sec-demo4@demo.handover.test', '{"full_name":"D4"}', 'authenticated', 'authenticated'),
+  ('00000000-0000-0000-0000-00000000d005', 'sec-demo5@demo.handover.test', '{"full_name":"D5"}', 'authenticated', 'authenticated');
+select pg_temp.expect_error('the demo seed refuses real accounts',
+  $$select public.seed_demo_workspace('{"manager":"00000000-0000-0000-0000-0000000000b2","supervisor":"00000000-0000-0000-0000-00000000d002","staff":["00000000-0000-0000-0000-00000000d003","00000000-0000-0000-0000-00000000d004","00000000-0000-0000-0000-00000000d005"]}')$$);
+select pg_temp.expect('a refused seed leaves the real person where they were',
+  (select workplace_id from profiles where id = '00000000-0000-0000-0000-0000000000b2') is not distinct from
+  (select workplace_id from profiles where id = '00000000-0000-0000-0000-0000000000a1'));
+select public.seed_demo_workspace('{"manager":"00000000-0000-0000-0000-00000000d001","supervisor":"00000000-0000-0000-0000-00000000d002","staff":["00000000-0000-0000-0000-00000000d003","00000000-0000-0000-0000-00000000d004","00000000-0000-0000-0000-00000000d005"]}');
+select pg_temp.expect('the demo seed creates a full demo workplace',
+  (select count(*) from messages m join workplaces w on w.id = m.workplace_id where w.is_demo) = 16
+  and (select count(*) from issues i join workplaces w on w.id = i.workplace_id where w.is_demo) = 7);
+select pg_temp.act_as('00000000-0000-0000-0000-00000000d003');
+select pg_temp.expect_error('demo accounts cannot leave the demo', $$select public.leave_workplace()$$);
+select pg_temp.expect_error('demo accounts cannot create workplaces', $$select public.create_workplace('Escape')$$);
+select pg_temp.expect('demo accounts cannot see real venues'' messages',
+  not exists (select 1 from messages m join workplaces w on w.id = m.workplace_id where not w.is_demo));
+select pg_temp.act_as('00000000-0000-0000-0000-00000000d001');
+select pg_temp.expect_error('the demo manager cannot change AI limits', format('select public.admin_set_ai_cap(%L, 9999)', public.my_workplace_id()));
+select pg_temp.expect_error('the demo manager cannot change workplace settings directly', $$update workplaces set is_demo = false$$);
+reset role;
+delete from join_attempts where user_id = '00000000-0000-0000-0000-0000000000e5';
+select pg_temp.act_as('00000000-0000-0000-0000-0000000000e5');
+select pg_temp.expect('nobody can join the demo workplace with its code',
+  (public.join_workplace('DEMO26') ->> 'error') is not null and public.my_workplace_id() is null);
 
 -- ---- Manager ----
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000a1');

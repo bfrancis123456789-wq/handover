@@ -31,10 +31,20 @@ Keep every shift on the same page. Handover is a workplace chat app for shift-ba
 - Profile photo and name, change email or password, forgot password, leave workplace
 - Export my data (a file with your profile, settings and messages) and Delete my account, with the option to delete your messages too
 - Privacy Policy and Terms of Use pages, agreed to at signup
+- Send feedback from any screen, with the venue and screen attached
+- First-run checklist for new managers that ticks itself off
+
+**For the Handover team**
+- Founder dashboard at `/admin` (admins only, two-factor sign-in): weekly active staff, messages, briefs viewed and refreshed, issues, push opt-in, AI cost and daily limit per venue, and feedback. Counts only.
+- A demo workspace with realistic sample data, reset with `npm run demo:reset` or from the dashboard
 - Welcome dialog on first login, with different text for managers and staff
 - Installable on phones (Add to Home Screen) with its own icon
 
-## Setup
+## Deploying
+
+Production runs on Cloudflare Pages and Supabase, with a separate staging project. GitHub Actions tests every change, deploys to staging, then to production after approval, with an encrypted backup first. See **[docs/deploy.md](docs/deploy.md)** for accounts, secrets and restore steps, **[docs/monitoring.md](docs/monitoring.md)** for Sentry alerts, and **[docs/pilot-dry-run.md](docs/pilot-dry-run.md)** for the check before the first venue.
+
+## Local setup
 
 1. **Create a Supabase project** at supabase.com.
 2. **Run the database migrations** in order, either by pasting each file in `supabase/migrations/` into the SQL editor, or with the CLI:
@@ -120,8 +130,8 @@ All rules live in the database, so the interface cannot bypass them.
 
 Two test suites run against a local Supabase stack (needs Docker, the Supabase CLI and Deno). GitHub Actions runs both on every push (`.github/workflows/ci.yml`), and uploads screenshots and logs if anything fails.
 
-- `e2e/walkthrough.cjs`: 130 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, push notifications (decrypted to check who received what), tracked issues carrying over beyond 24 hours, error reporting, CORS, exporting data, deleting accounts, phone layout and more.
-- `e2e/security.sql`: 70 checks that act as different users directly against the database, proving the rules hold even without the app.
+- `e2e/walkthrough.cjs`: 150 checks in a real browser with four people using the app at once: signup, joining, live chat, photos, likes, unread counts, deleting, roles, the brief, profile, notifications, passwords, leaving, removing members, push notifications (decrypted to check who received what), tracked issues carrying over beyond 24 hours, error reporting, CORS, exporting data, deleting accounts, feedback, the manager checklist, daily AI limits, the founder dashboard with two-factor sign-in, the demo, phone layout and more.
+- `e2e/security.sql`: 102 checks that act as different users directly against the database, proving the rules hold even without the app.
 
 To run them on your machine:
 
@@ -130,7 +140,7 @@ supabase start
 npm run test:e2e
 ```
 
-`e2e/run-ci.sh` starts stand-ins for Claude, the push service and Sentry (no real keys needed), runs each Edge Function with Deno, starts the app, then runs both suites.
+`e2e/run-ci.sh` starts stand-ins for Claude, the push service and Sentry (no real keys needed), runs each Edge Function with Deno, starts the app, then runs the Edge Function unit tests, both suites, and `e2e/csp-check.cjs` (the production build served with the real `public/_headers`).
 
 ## Project layout
 
@@ -147,6 +157,9 @@ supabase/
   functions/shift-brief/    Edge Function that calls Claude and records issue updates
   functions/send-push/      Edge Function that sends push notifications
   functions/delete-account/ Edge Function that deletes an account
+  functions/reset-demo/     Edge Function that resets the demo workspace
   functions/_shared/        CORS and Sentry helpers
 e2e/                        end-to-end and security tests, stand-in services, CI script
+scripts/                    demo reset, production backup, smoke check
+docs/                       deploy, monitoring, launch checklist, pilot dry run
 ```

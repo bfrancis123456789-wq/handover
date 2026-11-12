@@ -11,7 +11,8 @@ if (dsn) {
     environment: Deno.env.get("SENTRY_ENVIRONMENT") ?? "production",
     defaultIntegrations: false,
     sendDefaultPii: false,
-    tracesSampleRate: 0,
+    // Each call is recorded with its outcome, so Sentry can alert on failure rate.
+    tracesSampleRate: Number(Deno.env.get("SENTRY_TRACES_SAMPLE_RATE") ?? 1),
     beforeSend(event) {
       delete event.request;
       delete event.user;
@@ -34,9 +35,21 @@ export async function report(error: unknown, fn: string, extra: Record<string, s
 // Deno.serve with a safety net: anything thrown is reported and answered with a
 // plain 500, instead of a bare crash.
 export function serve(fn: string, handler: (req: Request) => Promise<Response>) {
+  const run = async (req: Request) => {
+    if (!dsn || req.method === "OPTIONS") return await handler(req);
+    // One transaction per call: status "internal_error" for 5xx answers.
+    return await Sentry.startSpan({ name: fn, op: "function", forceTransaction: true }, async (span) => {
+      const res = await handler(req);
+      span.setAttribute("http.response.status_code", res.status);
+      span.setStatus(res.status >= 500 ? { code: 2, message: "internal_error" } : { code: 1 });
+      return res;
+    });
+  };
   Deno.serve(async (req) => {
     try {
-      return await handler(req);
+      const res = await run(req);
+      if (dsn) await Sentry.flush(2000);
+      return res;
     } catch (error) {
       await report(error, fn);
       return new Response(JSON.stringify({ error: "Something went wrong. Try again in a moment." }), {

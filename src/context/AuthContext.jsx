@@ -28,7 +28,7 @@ export function AuthProvider({ children }) {
     if (p?.workplace_id) {
       const { data: w } = await supabase
         .from('workplaces')
-        .select('id, name, owner_id')
+        .select('id, name, owner_id, is_demo')
         .eq('id', p.workplace_id)
         .maybeSingle()
       setWorkplace(w)

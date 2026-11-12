@@ -49,6 +49,7 @@ start_fn() {
 start_fn shift-brief 8000
 start_fn send-push 8001
 start_fn delete-account 8002
+start_fn reset-demo 8003
 
 npx vite --mode e2e --config e2e/vite.e2e.config.js > "$LOGS/vite.log" 2>&1 & pids+=($!)
 
@@ -57,12 +58,18 @@ wait_for() {
   echo "Timed out waiting for $1"; return 1
 }
 for url in http://localhost:5173 http://127.0.0.1:4010/__calls http://127.0.0.1:4020/__pushes http://127.0.0.1:4030/__events \
-           http://127.0.0.1:8000 http://127.0.0.1:8001 http://127.0.0.1:8002; do
+           http://127.0.0.1:8000 http://127.0.0.1:8001 http://127.0.0.1:8002 http://127.0.0.1:8003; do
   wait_for "$url"
 done
+
+echo "== Edge Function unit tests =="
+deno test --node-modules-dir=none --no-config supabase/functions/_shared/
 
 echo "== Security checks =="
 docker exec -i supabase_db_handover psql -U postgres -qtA -v ON_ERROR_STOP=1 < e2e/security.sql | tee "$LOGS/security.txt"
 
 echo "== End-to-end walkthrough =="
 PUSH_FUNCTION_URL="http://$GATEWAY:8001" SERVICE_ROLE_KEY="$SB_SERVICE_ROLE_KEY" OUT_DIR="$OUT" node e2e/walkthrough.cjs
+
+echo "== Production headers (Content-Security-Policy) =="
+node e2e/csp-check.cjs

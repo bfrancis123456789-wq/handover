@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:e2e": "bash e2e/run-ci.sh"
+    "test:e2e": "bash e2e/run-ci.sh",
+    "demo:reset": "node scripts/reset-demo.mjs"
   },
   "dependencies": {
     "@sentry/react": "^10.77.1",

@@ -35,6 +35,11 @@ function Shell({ title, children }) {
 }
 
 const H = ({ children }) => <h2 className="text-lg font-semibold text-navy-900">{children}</h2>
+const Draft = () => (
+  <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 align-middle text-xs font-semibold uppercase tracking-wide text-amber-900">
+    Draft: pending legal review
+  </span>
+)
 const UL = ({ children }) => <ul className="list-disc space-y-1.5 pl-5">{children}</ul>
 
 export function Privacy() {
@@ -73,6 +78,26 @@ export function Privacy() {
           <li>To contact you about your account or important changes.</li>
         </UL>
         <p>We do not sell personal information, and we do not use your messages to advertise to you.</p>
+      </section>
+
+      <section className="space-y-2 rounded-xl p-4 ring-2 ring-amber-200" data-testid="draft-usage">
+        <H>Usage statistics and feedback <Draft /></H>
+        <p>To understand how Handover is used during our pilot and improve it, we keep:</p>
+        <UL>
+          <li><strong>Activity counts:</strong> which days you open Handover and how many times you view the shift brief, stored against your account and workplace. We report these to ourselves only as totals per workplace (for example, "12 of 15 staff were active this week").</li>
+          <li><strong>AI usage counts:</strong> how many shift briefs each workplace refreshes and how much AI processing they use, so we can manage costs. These are counts only; they contain no message text.</li>
+          <li><strong>Feedback you send:</strong> your message, the screen you sent it from, the app version and your device type, linked to your account and workplace so we can follow up.</li>
+        </UL>
+        <p>
+          We work these out from our own database. We don't use third-party analytics, advertising or tracking tools, and message content is
+          never used for statistics. Only authorised Handover staff, signed in with two-factor authentication, can see the totals and feedback.
+          Activity counts are kept for <mark className="rounded bg-amber-100 px-1 text-amber-900">[24]</mark> months and feedback for{' '}
+          <mark className="rounded bg-amber-100 px-1 text-amber-900">[24]</mark> months, then deleted.
+        </p>
+        <p>
+          Before each update to Handover we take an encrypted backup of the database, which is kept for 30 days by{' '}
+          <mark className="rounded bg-amber-100 px-1 text-amber-900">[GitHub (Microsoft), United States: confirm backup location]</mark>.
+        </p>
       </section>
 
       <section className="space-y-2">

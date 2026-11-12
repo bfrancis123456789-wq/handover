@@ -118,6 +118,14 @@ export default function Account() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-6 sm:px-6 lg:py-10">
       <PageHeader title="Account" subtitle={`Signed in as ${user.email}`} />
+      {workplace?.is_demo ? (
+        <Section title="This is a demo account">
+          <p className="text-sm text-slate-600">
+            Demo accounts are shared, so their email, password and workplace can't be changed here, and they can't be deleted.
+            The Handover team resets the demo after each session.
+          </p>
+        </Section>
+      ) : (<>
 
       <Section title="Change email" subtitle="We'll send a confirmation link before the change takes effect.">
         <form onSubmit={changeEmail} className="space-y-3">
@@ -189,6 +197,7 @@ export default function Account() {
           Read how we handle your information in our <a href="/privacy" className="font-medium text-teal-dark underline">Privacy Policy</a>.
         </p>
       </Section>
+      </>)}
     </div>
   )
 }

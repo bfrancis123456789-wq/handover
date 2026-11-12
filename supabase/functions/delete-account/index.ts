@@ -41,6 +41,9 @@ serve("delete-account", async (req) => {
   if (profile?.workplace_id) {
     const { error: leaveError } = await asUser.rpc("leave_workplace");
     if (leaveError) {
+      if (/demo accounts/i.test(leaveError.message)) {
+        return json({ error: "Demo accounts can't be deleted. They're reset by the Handover team." }, 403);
+      }
       const onlyManager = /only manager/i.test(leaveError.message);
       return json({
         error: onlyManager

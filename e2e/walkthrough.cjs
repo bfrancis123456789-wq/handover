@@ -61,6 +61,19 @@ async function pushesFor(page) {
   return all.filter((p) => p.id === id).map((p) => ({ ...p, payload: decrypt(p.body, sub) }))
 }
 
+// Authenticator-app codes (RFC 6238), so the test can sign in with two-factor.
+function totp(secretBase32, at = Date.now()) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  let bits = ''
+  for (const c of secretBase32.replace(/=+$/, '').toUpperCase()) bits += alphabet.indexOf(c).toString(2).padStart(5, '0')
+  const key = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)))
+  const counter = Buffer.alloc(8)
+  counter.writeBigUInt64BE(BigInt(Math.floor(at / 1000 / 30)))
+  const h = require('crypto').createHmac('sha1', key).update(counter).digest()
+  const o = h[h.length - 1] & 0xf
+  return String(((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000)).padStart(6, '0')
+}
+
 const results = []
 const errors = []
 
@@ -779,7 +792,120 @@ async function makePng(browser, file, color, label) {
     check('signing out stops notifications to that device', subsOf('mia') === 0)
   })
 
-  // 25. Privacy Policy, Terms, CORS and error monitoring
+  // 25. Pilot: analytics, feedback, manager checklist, AI cap, founder dashboard, demo
+  await step('pilot tools', async () => {
+    const idOf = (who) => sql(`select id from auth.users where email = '${email(who)}';`)
+    const harbour = sql(`select workplace_id from profiles where id = '${idOf('mia')}';`)
+
+    // Usage analytics: counts only.
+    check('app opens and brief views are counted per workplace',
+      Number(sql(`select coalesce(sum(opens), 0) from activity_days where workplace_id = '${harbour}';`)) > 0 &&
+      Number(sql(`select coalesce(sum(brief_views), 0) from activity_days where workplace_id = '${harbour}';`)) > 0)
+    check('AI tokens are logged per workplace',
+      Number(sql(`select coalesce(sum(input_tokens + output_tokens), 0) from ai_usage where workplace_id = '${harbour}';`)) > 0)
+    check('analytics tables hold no text at all',
+      sql(`select count(*) from information_schema.columns where table_name in ('activity_days', 'ai_usage') and data_type in ('text', 'character varying', 'jsonb');`) === '0')
+
+    // Send feedback, tagged with the screen it came from.
+    await staff.page.goto(`${BASE}/channels/general`)
+    await staff.page.waitForSelector('main h1:text-is("General")')
+    await staff.page.click('button:has-text("Send feedback")')
+    await staff.page.fill('#feedback-message', `The brief button is hard to find ${run}`)
+    await staff.page.click('role=dialog >> button:has-text("Send feedback")')
+    await staff.page.waitForSelector('text=Your feedback was sent')
+    await staff.page.click('role=dialog >> button:has-text("Done")')
+    check('feedback is saved with the venue, screen and app version',
+      sql(`select screen || '|' || (app_version is not null) from feedback where workplace_id = '${harbour}' and message like '%${run}';`) === 'Chat: General|true')
+
+    // First-run checklist for a manager at a brand new venue.
+    await outsider.page.goto(BASE)
+    await outsider.page.waitForSelector('[data-testid="manager-checklist"]')
+    const stepDone = async (k) => (await outsider.page.getAttribute(`[data-step="${k}"]`, 'data-done')) === 'true'
+    check('new managers see a setup checklist', !(await stepDone('staff_invited')) && !(await stepDone('announcement_posted')))
+    await outsider.page.goto(`${BASE}/channels/announcements`)
+    await outsider.page.waitForSelector('main h1:text-is("Announcements")')
+    await outsider.page.fill('#chat-text', 'Welcome to Handover, team!')
+    await outsider.page.click('button:has-text("Post")')
+    await outsider.page.waitForSelector('article:has-text("Welcome to Handover")')
+    await outsider.page.goto(BASE)
+    await outsider.page.waitForSelector('[data-testid="manager-checklist"]')
+    check('checklist steps tick themselves off from real activity', await stepDone('announcement_posted'))
+    check('team members don\'t see the manager checklist', (await staff.page.locator('[data-testid="manager-checklist"]').count()) === 0)
+    await outsider.page.click('button:has-text("Hide this list")')
+    await outsider.page.reload()
+    await outsider.page.waitForSelector('text=Your Shift Brief')
+    check('the checklist can be hidden for good', (await outsider.page.locator('[data-testid="manager-checklist"]').count()) === 0)
+
+    // Daily cap on fresh briefs per workplace.
+    sql(`update workplaces set daily_ai_cap = (select coalesce(max(calls), 0) from ai_usage where workplace_id = '${harbour}' and day = pilot_today()) where id = '${harbour}';`)
+    await staff.page.goto(`${BASE}/channels/general`)
+    await staff.page.waitForSelector('main h1:text-is("General")')
+    await staff.page.fill('#chat-text', 'Bar 2 tap is leaking slightly')
+    await staff.page.click('button:has-text("Post")')
+    await staff.page.waitForSelector('article:has-text("Bar 2 tap")')
+    sql(`update summaries set created_at = now() - interval '5 minutes' where user_id = '${idOf('sid')}';`)
+    const callsBefore = (await aiCalls()).length
+    await staff.page.goto(BASE)
+    await staff.page.click('button:has-text("Refresh Summary")')
+    await staff.page.waitForSelector("text=used today's", { timeout: 15000 })
+    check('the daily brief limit stops AI calls and explains why', (await aiCalls()).length === callsBefore)
+    sql(`update workplaces set daily_ai_cap = 40 where id = '${harbour}';`)
+
+    // Founder dashboard: only for admins, and only with two-factor sign-in.
+    await staff.page.goto(`${BASE}/admin`)
+    await staff.page.waitForSelector('text=This page is for the Handover team')
+    check('the founder dashboard is closed to everyone else', true)
+    sql(`insert into platform_admins (user_id) values ('${idOf('mia')}') on conflict do nothing;`)
+    await mgr.page.goto(`${BASE}/login`)
+    if (await mgr.page.isVisible('#login-email')) {
+      await mgr.page.fill('#login-email', email('mia'))
+      await mgr.page.fill('#login-password', 'password123')
+      await mgr.page.click('button:has-text("Sign in")')
+      await mgr.page.waitForSelector('text=Your Shift Brief')
+    }
+    await mgr.page.waitForSelector('nav >> text=Founder dashboard')
+    await mgr.page.click('nav >> text=Founder dashboard')
+    await mgr.page.waitForSelector('text=Set up two-factor sign-in')
+    check('admins must set up two-factor sign-in first', true)
+    const secret = (await mgr.page.textContent('[data-testid="totp-secret"]')).trim()
+    await mgr.page.fill('#totp-code', '000000')
+    await mgr.page.click('button:has-text("Continue")')
+    await mgr.page.waitForSelector("text=That code didn't work")
+    check('a wrong code is refused', true)
+    await mgr.page.fill('#totp-code', totp(secret))
+    await mgr.page.click('button:has-text("Continue")')
+    await mgr.page.waitForSelector('h1:text-is("Pilot venues")', { timeout: 15000 })
+    const card = mgr.page.locator('[data-testid="venue"][data-venue="Harbour Hotel"]')
+    await card.waitFor()
+    const cardText = await card.textContent()
+    check('the dashboard shows per-venue counts', /Active this week/.test(cardText) && /Push opt-in/.test(cardText) && /AI cost/.test(cardText))
+    const pageText = await mgr.page.textContent('main')
+    check('the dashboard shows no message content', !pageText.includes('Fridge 3') && !pageText.includes('Bar 2 tap'))
+    check('feedback appears on the dashboard', pageText.includes(`hard to find ${run}`) && pageText.includes('Chat: General'))
+    await card.locator('input[type="number"]').fill('55')
+    await card.locator('button:has-text("Save")').click()
+    await card.locator('text=Saved').waitFor()
+    check('admins can change a venue\'s daily brief limit', sql(`select daily_ai_cap from workplaces where id = '${harbour}';`) === '55')
+
+    // Demo workspace: one-click reset from the dashboard, then sign in as a prospect.
+    await mgr.page.click('button:has-text("Reset demo")')
+    await mgr.page.click('button:has-text("Yes, reset demo")')
+    await mgr.page.waitForSelector('text=Demo reset', { timeout: 30000 })
+    check('the demo resets with fresh sample data',
+      sql(`select count(*) from messages m join workplaces w on w.id = m.workplace_id where w.is_demo;`) === '16')
+    const prospect = await newUser(browser, 'prospect', { width: 390, height: 844 })
+    await prospect.page.goto(`${BASE}/login`)
+    await prospect.page.fill('#login-email', 'demo.staff1@demo.handover.test')
+    await prospect.page.fill('#login-password', 'HandoverDemo-2026')
+    await prospect.page.click('button:has-text("Sign in")')
+    await prospect.page.waitForSelector('[data-testid="demo-banner"]')
+    check('demo accounts open straight into a realistic workspace', (await prospect.page.locator('[data-testid="critical"] li').count()) > 0)
+    await prospect.page.goto(`${BASE}/settings/account`)
+    await prospect.page.waitForSelector('text=This is a demo account')
+    check('demo accounts can\'t change email, password, leave or delete', (await prospect.page.locator('button:has-text("Delete my account")').count()) === 0)
+  })
+
+  // 26. Privacy Policy, Terms, CORS and error monitoring
   await step('launch readiness', async () => {
     const visitor = await newUser(browser, 'visitor')
     await visitor.page.goto(`${BASE}/login`)
@@ -787,6 +913,9 @@ async function makePng(browser, file, color, label) {
     await visitor.page.waitForSelector('h1:text-is("Privacy Policy")')
     check('the Privacy Policy opens without signing in', await visitor.page.isVisible('text=Australian Privacy Principles'))
     check('unfilled placeholders are highlighted', (await visitor.page.locator('mark').count()) > 0)
+    check('the usage statistics and feedback wording is shown and marked as a draft',
+      await visitor.page.isVisible('[data-testid="draft-usage"] >> text=Draft: pending legal review') &&
+      (await visitor.page.textContent('[data-testid="draft-usage"]')).includes("don't use third-party analytics"))
     await visitor.page.goto(`${BASE}/terms`)
     await visitor.page.waitForSelector('h1:text-is("Terms of Use")')
     check('the Terms of Use open without signing in', await visitor.page.isVisible('text=Australian Consumer Law'))
@@ -832,9 +961,13 @@ async function makePng(browser, file, color, label) {
     const be = (await sentryEvents()).find((e) => e.project === '2' && e.event.tags?.function === 'shift-brief')
     check('Edge Function errors reach Sentry, tagged with the function', !!be)
     check('Edge Function reports contain no message text or email', !!be && !be.raw.includes('Coffee machine') && !be.raw.includes(email('sid')))
+    const tx = (await sentryEvents()).filter((e) => e.project === '2' && e.type === 'transaction' && e.event.transaction === 'shift-brief')
+    check('function calls are recorded with their outcome, for failure-rate alerts',
+      tx.some((t) => t.event.contexts?.trace?.status === 'ok') && tx.some((t) => t.event.contexts?.trace?.status === 'internal_error'),
+      tx.map((t) => t.event.contexts?.trace?.status).join(','))
   })
 
-  // 26. Export my data and delete my account
+  // 27. Export my data and delete my account
   await step('export and delete', async () => {
     async function openSettings(u, name) {
       if (await u.page.isVisible('button[aria-label="Open menu"]')) {

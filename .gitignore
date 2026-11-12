@@ -9,3 +9,5 @@ supabase/functions/.env
 e2e/out
 *.zip
 .env.e2e.local
+e2e/.csp-dist
+e2e/.preview-headers.json

@@ -23,7 +23,9 @@ http.createServer((req, res) => {
     for (let i = 1; i + 1 < lines.length; i += 2) {
       try {
         const head = JSON.parse(lines[i])
-        if (head.type === 'event') events.push({ project: m[1], raw: lines[i + 1], event: JSON.parse(lines[i + 1]) })
+        if (head.type === 'event' || head.type === 'transaction') {
+          events.push({ project: m[1], type: head.type, raw: lines[i + 1], event: JSON.parse(lines[i + 1]) })
+        }
       } catch { /* ignore non-JSON items */ }
     }
     res.writeHead(200, { 'content-type': 'application/json' })

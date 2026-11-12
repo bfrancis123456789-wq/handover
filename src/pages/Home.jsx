@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { formatCount, useUnread } from '../context/UnreadContext'
 import { supabase } from '../lib/supabase'
+import { recordActivity } from '../lib/analytics'
 import { canAccess, channelById, channelsFor } from '../lib/constants'
 import { firstName, greeting, issueAge, longDate, messageTime } from '../lib/format'
 import Notice from '../components/Notice'
+import ManagerChecklist from '../components/ManagerChecklist'
 import Spinner from '../components/Spinner'
 import { CopyIcon, HashIcon, LockIcon, RefreshIcon } from '../components/Icons'
 
@@ -123,9 +125,12 @@ export default function Home() {
   const [info, setInfo] = useState('')
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [checklistKey, setChecklistKey] = useState(0)
   const [now, setNow] = useState(new Date())
   const reloadTimer = useRef(null)
   const canManage = profile.role === 'supervisor' || profile.role === 'manager'
+
+  useEffect(() => { recordActivity('brief_view') }, [profile.workplace_id])
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 60_000)
@@ -188,7 +193,7 @@ export default function Home() {
     if (error) return setError(await readFunctionError(error))
     await loadIssues()
     if (data?.empty) return setInfo('No messages in the last 24 hours, so there is nothing new to read. Open issues are still listed below.')
-    if (data?.summary) setSummary(data.summary)
+    if (data?.summary) { setSummary(data.summary); setChecklistKey((k) => k + 1) }
     if (data?.unchanged) return setInfo('Already up to date. Nothing new has been posted since this brief was written.')
     if (data?.cooldown) return setInfo(`This brief was refreshed moments ago. You can refresh again in ${data.retry_after} seconds.`)
     const parts = []
@@ -241,6 +246,8 @@ export default function Home() {
         </h1>
         <p className="mt-1 text-sm text-slate-500">{workplace?.name}</p>
       </div>
+
+      {profile.role === 'manager' && <ManagerChecklist refreshKey={checklistKey} />}
 
       <div className="card p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">

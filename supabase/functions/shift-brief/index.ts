@@ -204,6 +204,20 @@ serve("shift-brief", async (req) => {
   }));
   const issueIds = new Map(issueRows.map((r) => [r.label, r.id]));
 
+  // Daily cap per workplace (cost control). Reserving the call here also counts it.
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey, { auth: { persistSession: false } });
+  const { data: budget, error: budgetError } = await admin.rpc("claim_ai_call", { p_workplace: profile.workplace_id });
+  if (budgetError) {
+    await report(budgetError, "shift-brief", { step: "claim_ai_call" });
+    return json({ error: "The brief could not be refreshed. Try again in a moment." }, 500);
+  }
+  if (!budget?.allowed) {
+    return json({
+      error: `Your workplace has used today's ${budget?.cap ?? 0} fresh briefs. Open issues are still listed below, and you can refresh again tomorrow.`,
+      cap_reached: true,
+    }, 429);
+  }
+
   const client = new Anthropic({ apiKey });
   // deno-lint-ignore no-explicit-any
   let brief: any;
@@ -219,6 +233,12 @@ serve("shift-brief", async (req) => {
           `<open_issues>\n${issueRows.map((r) => r.line).join("\n") || "(none)"}\n</open_issues>\n\n` +
           `<messages>\n${lines.map((l) => l.line).join("\n")}\n</messages>\n\nUpdate the issues and set the next priorities.`,
       }],
+    });
+    // Token counts per workplace, for cost per venue (no content is stored).
+    await admin.rpc("record_ai_tokens", {
+      p_workplace: profile.workplace_id,
+      p_input: response.usage?.input_tokens ?? 0,
+      p_output: response.usage?.output_tokens ?? 0,
     });
     if (response.stop_reason === "refusal") {
       return json({ error: "The brief could not be written for these messages." }, 502);
@@ -258,7 +278,6 @@ serve("shift-brief", async (req) => {
     .filter((id: string | undefined) => id && !resolvedSet.has(id));
 
   // Writes go through one checked database function, which only the service role may call.
-  const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey, { auth: { persistSession: false } });
   const { data: applied, error: applyError } = await admin.rpc("apply_brief_updates", {
     p_user: profile.id,
     p_new: newIssues,

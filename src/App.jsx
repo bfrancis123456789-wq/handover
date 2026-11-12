@@ -16,6 +16,7 @@ const Notifications = lazy(() => import('./pages/settings/Notifications'))
 const Account = lazy(() => import('./pages/settings/Account'))
 const Help = lazy(() => import('./pages/settings/Help'))
 const ManageTeam = lazy(() => import('./pages/settings/ManageTeam'))
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })))
 const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })))
 
@@ -67,6 +68,10 @@ export default function App() {
   }
 
   if (recovery) return <Suspense fallback={<FullScreenSpinner />}><ResetPassword /></Suspense>
+
+  // The founder dashboard works whether or not the admin belongs to a venue.
+  // The database decides who may see it (and requires two-factor sign-in).
+  if (pathname === '/admin') return <Suspense fallback={<FullScreenSpinner />}><AdminDashboard /></Suspense>
 
   if (!profile?.workplace_id) {
     return (

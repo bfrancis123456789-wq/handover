@@ -12,6 +12,7 @@ export default mergeConfig(base, defineConfig({
     proxy: {
       '/functions/v1/shift-brief': { target: 'http://127.0.0.1:8000', rewrite: () => '/' },
       '/functions/v1/delete-account': { target: 'http://127.0.0.1:8002', rewrite: () => '/' },
+      '/functions/v1/reset-demo': { target: 'http://127.0.0.1:8003', rewrite: () => '/' },
       '/auth/v1': SUPABASE,
       '/rest/v1': SUPABASE,
       '/storage/v1': SUPABASE,

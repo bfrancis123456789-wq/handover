@@ -1,49 +1,43 @@
-name: CI
+name: CI and deploy
+
+# Pull requests: tests, then a preview site on Cloudflare Pages using the staging database.
+# Merges to main: tests, then staging (migrations, functions, site), then production
+# (encrypted backup first, then migrations, functions, site). See docs/deploy.md.
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
-    name: Build, security checks and end-to-end walkthrough
+    name: Build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-
       - uses: supabase/setup-cli@v1
         with:
           version: 2.122.1
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
+      - run: npm ci
+      - run: npm run build
       - name: Start local Supabase
         run: supabase start -x studio,imgproxy,vector,logflare,supavisor,postgres-meta,edge-runtime
-
       - name: Install Playwright's Chromium
         run: npx playwright install --with-deps chromium
-
-      - name: Security checks and end-to-end walkthrough
+      - name: Unit, security, end-to-end and header checks
         run: bash e2e/run-ci.sh
-
       - name: Upload screenshots and logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -51,7 +45,141 @@ jobs:
           name: e2e-results
           path: e2e/out
           retention-days: 7
-
       - name: Stop Supabase
         if: always()
         run: supabase stop --no-backup
+
+  preview:
+    name: Preview site (staging data)
+    needs: test
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build for staging
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+          VITE_SENTRY_DSN: ${{ vars.SENTRY_DSN_FRONTEND }}
+          VITE_SENTRY_ENVIRONMENT: preview
+          VITE_RELEASE: ${{ github.sha }}
+      - name: Deploy preview
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ vars.CF_PAGES_PROJECT }} --branch=pr-${{ github.event.pull_request.number }}
+      - name: Comment with the preview link
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body "Preview (staging data): $URL"
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.1
+      - run: npm ci
+      - name: Link the staging project
+        run: supabase link --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
+      - name: Run migrations on staging
+        run: supabase db push
+      - name: Deploy Edge Functions to staging
+        run: supabase functions deploy
+      - name: Build for staging
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+          VITE_SENTRY_DSN: ${{ vars.SENTRY_DSN_FRONTEND }}
+          VITE_SENTRY_ENVIRONMENT: staging
+          VITE_RELEASE: ${{ github.sha }}
+      - name: Deploy the staging site
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ vars.CF_PAGES_PROJECT }} --branch=staging
+      - name: Smoke check
+        run: bash scripts/smoke-check.sh "${{ vars.SITE_URL }}"
+
+  deploy-production:
+    name: Deploy to production
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production  # add required reviewers in GitHub settings to approve each release
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.1
+      - run: npm ci
+      - name: Link the production project
+        run: supabase link --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
+      - name: Back up production (encrypted)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: bash scripts/backup-production.sh "backup-${{ github.run_id }}"
+      - name: Keep the backup for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-backup-${{ github.run_id }}
+          path: backup-${{ github.run_id }}.tar.gz.gpg
+          retention-days: 30
+          if-no-files-found: error
+      - name: Run migrations on production
+        run: supabase db push
+      - name: Deploy Edge Functions to production
+        run: supabase functions deploy
+      - name: Build for production
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+          VITE_SENTRY_DSN: ${{ vars.SENTRY_DSN_FRONTEND }}
+          VITE_SENTRY_ENVIRONMENT: production
+          VITE_RELEASE: ${{ github.sha }}
+      - name: Deploy the production site
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ vars.CF_PAGES_PROJECT }} --branch=main
+      - name: Smoke check
+        run: bash scripts/smoke-check.sh "${{ vars.SITE_URL }}"
